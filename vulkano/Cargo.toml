@@ -1,5 +1,5 @@
 [package]
-name = "vulkano"
+name = "vulkano-and-ash_vulkano"
 version = "0.1.0"
 authors = ["Brandon Pollack <brandonpollack23@gmail.com>"]
 edition = "2018"
