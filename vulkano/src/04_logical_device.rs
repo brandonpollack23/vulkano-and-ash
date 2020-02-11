@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use vulkano::{
   self,
+  device::{Device, DeviceExtensions, Features, Queue},
   instance::{
     debug::{DebugCallback, MessageSeverity, MessageType},
     layers_list, ApplicationInfo, Instance, InstanceExtensions, PhysicalDevice, Version,
@@ -24,17 +25,17 @@ const ENABLE_VALIDATION_LAYERS: bool = true;
 const ENABLE_VALIDATION_LAYERS: bool = false;
 
 struct QueueFamilyIndices {
-  graphics_family: Option<usize>,
+  graphics_queue_family_index: Option<usize>,
 }
 impl QueueFamilyIndices {
   fn new() -> QueueFamilyIndices {
     QueueFamilyIndices {
-      graphics_family: None,
+      graphics_queue_family_index: None,
     }
   }
 
   fn is_complete(&self) -> bool {
-    self.graphics_family.is_some()
+    self.graphics_queue_family_index.is_some()
   }
 }
 
@@ -47,6 +48,13 @@ pub struct HelloTriangleApplication {
   debug_callback: Option<DebugCallback>,
   #[allow(dead_code)]
   physical_device_index: usize,
+  #[allow(dead_code)]
+  logical_device: Arc<Device>,
+
+  // This field, along with all the queues, might have more distinct names in a more complex
+  // system, to signify what each is really for
+  #[allow(dead_code)]
+  graphics_queue: Arc<Queue>,
 }
 impl HelloTriangleApplication {
   pub fn initialize() -> Self {
@@ -54,12 +62,16 @@ impl HelloTriangleApplication {
     let instance = Self::create_vulkan_instance();
     let debug_callback = Self::setup_debug_callback_if_enabled(&instance);
     let physical_device_index = Self::pick_physical_device(&instance);
+    let (logical_device, graphics_queue) =
+      Self::create_logical_device_and_queues(&instance, physical_device_index);
 
     Self {
       window,
       instance,
       debug_callback,
       physical_device_index,
+      logical_device,
+      graphics_queue,
     }
   }
 
@@ -212,7 +224,7 @@ impl HelloTriangleApplication {
 
     for (i, queue_family) in physical_device.queue_families().enumerate() {
       if queue_family.supports_graphics() {
-        indices_of_queue_families_that_support_feature.graphics_family = Some(i);
+        indices_of_queue_families_that_support_feature.graphics_queue_family_index = Some(i);
       }
 
       if indices_of_queue_families_that_support_feature.is_complete() {
@@ -221,6 +233,41 @@ impl HelloTriangleApplication {
     }
 
     indices_of_queue_families_that_support_feature
+  }
+
+  /// Creates the logical device from the instance and physical device index.
+  /// Returns the logical device and the graphics queue.
+  fn create_logical_device_and_queues(
+    instance: &Arc<Instance>, physical_device_index: usize,
+  ) -> (Arc<Device>, Arc<Queue>) {
+    let physical_device = PhysicalDevice::from_index(instance, physical_device_index)
+      .expect("Unable to get physical device at the given index");
+
+    let queue_indices = Self::find_queue_families(&physical_device);
+
+    let graphics_queue_family_index = queue_indices
+      .graphics_queue_family_index
+      .expect("No Graphics Family Queue Index!");
+    let graphics_queue_family = physical_device
+      .queue_families()
+      .nth(graphics_queue_family_index)
+      .unwrap();
+    let graphics_queue_priority = 1.0f32;
+
+    // Right now no specific features are needed, but later we'll likely need some
+    // features for pipelines. When we actually start drawing, we'll also need
+    // extensions like VK_KHR_swapchain.
+    let (device, mut queues) = Device::new(
+      physical_device,
+      &Features::none(),
+      &DeviceExtensions::none(),
+      [(graphics_queue_family, graphics_queue_priority)]
+        .iter()
+        .cloned(),
+    )
+    .expect("Unable to create logical device!");
+
+    (device, queues.next().unwrap())
   }
 
   /// Takes full control of the executing thread and runs the event loop for it.
