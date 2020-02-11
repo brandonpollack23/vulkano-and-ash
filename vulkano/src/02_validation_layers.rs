@@ -140,6 +140,11 @@ impl HelloTriangleApplication {
     //  Instead, vulkano (and via that vk-sys) already handles that and we just need
     // to call the convenient creation function, whose destructor will also call the
     // corresponding destroy function.
+    //
+    // Unfortunately, vulkano doesn't support setting a value for pNext in
+    // vkInstanceCreateInfo so we can't get debug callbacks for create/destroy
+    // instance, but vulkano is supposed to validate and cover those errors anyway,
+    // right?
     DebugCallback::new(instance, msg_severity, msg_types, |msg| {
       let message_prefix = if msg.severity.error {
         "VALIDATION ERROR:"
