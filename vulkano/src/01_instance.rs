@@ -61,9 +61,7 @@ impl HelloTriangleApplication {
 
   /// Initializes vulkan instance.
   fn init_vulkan_instance() -> Arc<Instance> {
-    let supported_extensions =
-      InstanceExtensions::supported_by_core().expect("failed to retrieve supported extensions");
-    println!("Supported extensions: {:?}", supported_extensions);
+    Self::print_supported_extensions();
 
     let app_info = ApplicationInfo {
       application_name: Some("Hello Triangle".into()),
@@ -79,6 +77,12 @@ impl HelloTriangleApplication {
     // In vulkano we use "new" static factory methods to construct vkInstance and other vulkan objects instead of passing all the params in a create_info struct.
     Instance::new(Some(&app_info), &vulkano_win::required_extensions(), None)
       .expect("Failed to create Vulkan instance")
+  }
+
+  fn print_supported_extensions() {
+    let supported_extensions =
+      InstanceExtensions::supported_by_core().expect("failed to retrieve supported extensions");
+    println!("Supported Extensions:\n\t{:?}", supported_extensions);
   }
 
   /// Takes full control of the executing thread and runs the event loop for it.
