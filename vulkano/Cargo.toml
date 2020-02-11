@@ -8,6 +8,10 @@ edition = "2018"
 name = "base_code_vulkano"
 path = "src/00_base_code.rs"
 
+[[bin]]
+name = "instance_creation_vulkano"
+path = "src/01_instance.rs"
+
 [dependencies]
 vulkano = "0.17.0"
 winit = "0.21.0"

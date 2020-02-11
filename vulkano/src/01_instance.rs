@@ -1,4 +1,8 @@
-use vulkano;
+use std::sync::Arc;
+use vulkano::{
+  self,
+  instance::{ApplicationInfo, Instance, InstanceExtensions, Version},
+};
 use winit::{
   dpi::LogicalSize,
   event::{ElementState, Event, VirtualKeyCode, WindowEvent},
@@ -8,11 +12,6 @@ use winit::{
 
 const WIDTH: u32 = 800;
 const HEIGHT: u32 = 600;
-
-/// Struct representing the application to display the triangle.
-pub struct HelloTriangleApplication {
-  window: HelloTriangleWindow,
-}
 
 /// Struct representing the window to draw the triangle in.
 struct HelloTriangleWindow {
@@ -46,11 +45,40 @@ impl HelloTriangleWindow {
   }
 }
 
+/// Struct representing the application to display the triangle.
+pub struct HelloTriangleApplication {
+  window: HelloTriangleWindow,
+  instance: Arc<Instance>,
+}
+
 impl HelloTriangleApplication {
   pub fn initialize() -> Self {
     Self {
       window: HelloTriangleWindow::init_window(),
+      instance: Self::init_vulkan_instance(),
     }
+  }
+
+  /// Initializes vulkan instance.
+  fn init_vulkan_instance() -> Arc<Instance> {
+    let supported_extensions =
+      InstanceExtensions::supported_by_core().expect("failed to retrieve supported extensions");
+    println!("Supported extensions: {:?}", supported_extensions);
+
+    let app_info = ApplicationInfo {
+      application_name: Some("Hello Triangle".into()),
+      application_version: Some(Version {
+        major: 0,
+        minor: 1,
+        patch: 0,
+      }),
+      engine_name: Some("No Engine".into()),
+      engine_version: None,
+    };
+
+    // In vulkano we use "new" static factory methods to construct vkInstance and other vulkan objects instead of passing all the params in a create_info struct.
+    Instance::new(Some(&app_info), &vulkano_win::required_extensions(), None)
+      .expect("Failed to create Vulkan instance")
   }
 
   /// Takes full control of the executing thread and runs the event loop for it.
