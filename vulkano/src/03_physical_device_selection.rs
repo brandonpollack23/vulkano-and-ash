@@ -3,7 +3,7 @@ use vulkano::{
   self,
   instance::{
     debug::{DebugCallback, MessageSeverity, MessageType},
-    layers_list, ApplicationInfo, Instance, InstanceExtensions, Version,
+    layers_list, ApplicationInfo, Instance, InstanceExtensions, PhysicalDevice, Version,
   },
 };
 use winit::{
@@ -23,6 +23,21 @@ const ENABLE_VALIDATION_LAYERS: bool = true;
 #[cfg(not(debug_assertions))]
 const ENABLE_VALIDATION_LAYERS: bool = false;
 
+struct QueueFamilyIndices {
+  graphics_family: Option<usize>,
+}
+impl QueueFamilyIndices {
+  fn new() -> QueueFamilyIndices {
+    QueueFamilyIndices {
+      graphics_family: None,
+    }
+  }
+
+  fn is_complete(&self) -> bool {
+    self.graphics_family.is_some()
+  }
+}
+
 /// Struct representing the application to display the triangle.
 pub struct HelloTriangleApplication {
   window: HelloTriangleWindow,
@@ -30,18 +45,21 @@ pub struct HelloTriangleApplication {
   instance: Arc<Instance>,
   #[allow(dead_code)]
   debug_callback: Option<DebugCallback>,
+  #[allow(dead_code)]
+  physical_device_index: usize,
 }
-
 impl HelloTriangleApplication {
   pub fn initialize() -> Self {
     let window = HelloTriangleWindow::init_window();
     let instance = Self::create_vulkan_instance();
     let debug_callback = Self::setup_debug_callback_if_enabled(&instance);
+    let physical_device_index = Self::pick_physical_device(&instance);
 
     Self {
       window,
       instance,
       debug_callback,
+      physical_device_index,
     }
   }
 
@@ -164,6 +182,45 @@ impl HelloTriangleApplication {
       );
     })
     .ok()
+  }
+
+  /// For now we're going to just select the first enumerated physical device.
+  /// A real game engine could:
+  /// * Allow users to select via a dropdown and reinitialize from physical
+  ///   devices onward
+  /// * Check for most wanted features and pick the best possible GPU with a
+  ///   priority or score.
+  ///
+  /// For now we'll select the first device that supports all the queue families
+  /// we need.
+  fn pick_physical_device(instance: &Arc<Instance>) -> usize {
+    PhysicalDevice::enumerate(instance)
+      .position(|physical_device| Self::is_device_suitable(&physical_device))
+      .expect("Failed to find a suitable Physical Device!")
+  }
+
+  fn is_device_suitable(physical_device: &PhysicalDevice) -> bool {
+    let feature_indices = Self::find_queue_families(physical_device);
+    feature_indices.is_complete()
+  }
+
+  /// Returns the [QueueFamilyIndices](struct.QueueFamilyIndices.html) supported
+  /// by this physical device.
+  /// TODO QueueFamilyIndices member
+  fn find_queue_families(physical_device: &PhysicalDevice) -> QueueFamilyIndices {
+    let mut indices_of_queue_families_that_support_feature = QueueFamilyIndices::new();
+
+    for (i, queue_family) in physical_device.queue_families().enumerate() {
+      if queue_family.supports_graphics() {
+        indices_of_queue_families_that_support_feature.graphics_family = Some(i);
+      }
+
+      if indices_of_queue_families_that_support_feature.is_complete() {
+        break;
+      }
+    }
+
+    indices_of_queue_families_that_support_feature
   }
 
   /// Takes full control of the executing thread and runs the event loop for it.
