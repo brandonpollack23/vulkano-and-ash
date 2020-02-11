@@ -16,6 +16,10 @@ path = "src/01_instance.rs"
 name = "validation_layers_vulkano"
 path = "src/02_validation_layers.rs"
 
+[[bin]]
+name = "physical_device_selection"
+path = "src/03_physical_device_selection.rs"
+
 [dependencies]
 vulkano = "0.17.0"
 winit = "0.21.0"
