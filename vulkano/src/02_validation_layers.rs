@@ -39,7 +39,7 @@ impl HelloTriangleApplication {
 
   /// Initializes vulkan instance.
   fn create_vulkan_instance() -> Arc<Instance> {
-    if ENABLE_VALIDATION_LAYERS && !Self::check_validation_layer_support() {
+    if ENABLE_VALIDATION_LAYERS && !Self::check_and_print_validation_layer_support() {
       panic!("Validation layers requested, but not available!");
     }
 
@@ -73,14 +73,19 @@ impl HelloTriangleApplication {
   fn print_supported_extensions() {
     let supported_extensions =
       InstanceExtensions::supported_by_core().expect("failed to retrieve supported extensions");
-    println!("Supported Extensions:\n\t{:?}", supported_extensions);
+    println!("Supported Extensions:\n\t{:?}\n", supported_extensions);
   }
 
-  fn check_validation_layer_support() -> bool {
+  fn check_and_print_validation_layer_support() -> bool {
     let layers: Vec<_> = layers_list()
       .expect("Could not get available layers")
       .map(|l| l.name().to_owned())
       .collect();
+
+    println!(
+      "Supported Validation Layers: \n\t{:?}\nRequested Validation Layers \n\t{:?}\n",
+      layers, VALIDATION_LAYERS
+    );
 
     // Ensure all the Validation layers we require
     VALIDATION_LAYERS
