@@ -12,6 +12,10 @@ path = "src/00_base_code.rs"
 name = "instance_creation_vulkano"
 path = "src/01_instance.rs"
 
+[[bin]]
+name = "validation_layers_vulkano"
+path = "src/02_validation_layers.rs"
+
 [dependencies]
 vulkano = "0.17.0"
 winit = "0.21.0"
