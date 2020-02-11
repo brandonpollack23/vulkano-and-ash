@@ -10,4 +10,6 @@ Things should be generic!
 * Width
 * Height
 * Fullscreen
+* Dont just print, offer logging ability instead
 * Specify validation layers/debug mode
+* Specify validation logging level

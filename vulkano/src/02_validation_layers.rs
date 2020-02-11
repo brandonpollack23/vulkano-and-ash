@@ -2,7 +2,8 @@ use std::sync::Arc;
 use vulkano::{
   self,
   instance::{
-    debug::DebugCallback, layers_list, ApplicationInfo, Instance, InstanceExtensions, Version,
+    debug::{DebugCallback, MessageSeverity, MessageType},
+    layers_list, ApplicationInfo, Instance, InstanceExtensions, Version,
   },
 };
 use winit::{
@@ -25,15 +26,22 @@ const ENABLE_VALIDATION_LAYERS: bool = false;
 /// Struct representing the application to display the triangle.
 pub struct HelloTriangleApplication {
   window: HelloTriangleWindow,
+  #[allow(dead_code)]
   instance: Arc<Instance>,
-  //  debug_callback: Option<DebugCallback>,
+  #[allow(dead_code)]
+  debug_callback: Option<DebugCallback>,
 }
 
 impl HelloTriangleApplication {
   pub fn initialize() -> Self {
+    let window = HelloTriangleWindow::init_window();
+    let instance = Self::create_vulkan_instance();
+    let debug_callback = Self::setup_debug_callback_if_enabled(&instance);
+
     Self {
-      window: HelloTriangleWindow::init_window(),
-      instance: Self::create_vulkan_instance(),
+      window,
+      instance,
+      debug_callback,
     }
   }
 
@@ -56,11 +64,13 @@ impl HelloTriangleApplication {
       engine_version: None,
     };
 
-    // In vulkano we use "new" static factory methods to construct vkInstance and other vulkan objects instead of passing all the params in a create_info struct.
+    // In vulkano we use "new" static factory methods to construct vkInstance and
+    // other vulkan objects instead of passing all the params in a create_info
+    // struct.
     if ENABLE_VALIDATION_LAYERS {
       Instance::new(
         Some(&app_info),
-        &vulkano_win::required_extensions(),
+        &Self::get_required_extensions(),
         VALIDATION_LAYERS.iter().cloned(),
       )
       .expect("Failed to create Vulkan instance")
@@ -68,12 +78,6 @@ impl HelloTriangleApplication {
       Instance::new(Some(&app_info), &vulkano_win::required_extensions(), None)
         .expect("Failed to create Vulkan instance")
     }
-  }
-
-  fn print_supported_extensions() {
-    let supported_extensions =
-      InstanceExtensions::supported_by_core().expect("failed to retrieve supported extensions");
-    println!("Supported Extensions:\n\t{:?}\n", supported_extensions);
   }
 
   fn check_and_print_validation_layer_support() -> bool {
@@ -93,11 +97,76 @@ impl HelloTriangleApplication {
       .all(|layer_name| layers.contains(&layer_name.to_string()))
   }
 
+  fn get_required_extensions() -> InstanceExtensions {
+    let mut extensions = vulkano_win::required_extensions();
+
+    if ENABLE_VALIDATION_LAYERS {
+      // No need to check for the existence of this extension because the validation
+      // layers being present already confirms it.
+      extensions.ext_debug_utils = true;
+    }
+
+    extensions
+  }
+
+  fn print_supported_extensions() {
+    let supported_extensions =
+      InstanceExtensions::supported_by_core().expect("failed to retrieve supported extensions");
+    println!("Supported Extensions:\n\t{:?}\n", supported_extensions);
+  }
+
+  fn setup_debug_callback_if_enabled(instance: &Arc<Instance>) -> Option<DebugCallback> {
+    if !ENABLE_VALIDATION_LAYERS {
+      return None;
+    }
+
+    let msg_severity = MessageSeverity {
+      error: true,
+      warning: true,
+      information: false,
+      verbose: true,
+    };
+
+    let msg_types = MessageType {
+      general: true,
+      performance: true,
+      validation: true,
+    };
+
+    // The extension function (vkCreateDebugUtilsMessenger) needs to be loaded
+    // (since it's a part of the debug_utils extension). This would be done in
+    // c-like languages by calling vkGetInstanceProdAccr and passing a string with
+    // the name of the extension function (see [the vulkan tutorial](https://vulkan-tutorial.com/Drawing_a_triangle/Setup/Validation_layers)).
+    //  Instead, vulkano (and via that vk-sys) already handles that and we just need
+    // to call the convenient creation function, whose destructor will also call the
+    // corresponding destroy function.
+    DebugCallback::new(instance, msg_severity, msg_types, |msg| {
+      let message_prefix = if msg.severity.error {
+        "VALIDATION ERROR:"
+      } else if msg.severity.warning {
+        "VALIDATION WARNING:"
+      } else if msg.severity.information {
+        "VALIDATION WARNING:"
+      } else if msg.severity.verbose {
+        "VALIDATION VERBOSE MESSAGE:"
+      } else {
+        ""
+      };
+
+      println!(
+        "{} validation layer {}; {}",
+        message_prefix, msg.layer_prefix, msg.description
+      );
+    })
+    .ok()
+  }
+
   /// Takes full control of the executing thread and runs the event loop for it.
   fn main_loop(self) {
     self.window.run(move |window_event, _, control_flow| {
       match window_event {
-        // When the window system requests a close, signal to winit that we'd like to close the window.
+        // When the window system requests a close, signal to winit that we'd like to close the
+        // window.
         Event::WindowEvent {
           event: WindowEvent::CloseRequested,
           ..
