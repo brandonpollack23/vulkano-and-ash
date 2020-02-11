@@ -6,7 +6,8 @@ edition = "2018"
 
 [[bin]]
 name = "base_code_vulkano"
-path = "src/base_code.rs"
+path = "src/00_base_code.rs"
 
 [dependencies]
 vulkano = "0.17.0"
+winit = "0.21.0"
