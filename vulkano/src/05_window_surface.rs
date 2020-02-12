@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashSet, iter::FromIterator, sync::Arc};
 use vulkano::{
   self,
   device::{Device, DeviceExtensions, Features, Queue},
@@ -6,7 +6,9 @@ use vulkano::{
     debug::{DebugCallback, MessageSeverity, MessageType},
     layers_list, ApplicationInfo, Instance, InstanceExtensions, PhysicalDevice, Version,
   },
+  swapchain::Surface,
 };
+use vulkano_win::VkSurfaceBuild;
 use winit::{
   dpi::LogicalSize,
   event::{ElementState, Event, VirtualKeyCode, WindowEvent},
@@ -26,52 +28,87 @@ const ENABLE_VALIDATION_LAYERS: bool = false;
 
 struct QueueFamilyIndices {
   graphics_queue_family_index: Option<usize>,
+  present_queue_family_index: Option<usize>,
 }
 impl QueueFamilyIndices {
   fn new() -> QueueFamilyIndices {
     QueueFamilyIndices {
       graphics_queue_family_index: None,
+      present_queue_family_index: None,
     }
   }
 
   fn is_complete(&self) -> bool {
-    self.graphics_queue_family_index.is_some()
+    self.graphics_queue_family_index.is_some() && self.present_queue_family_index.is_some()
+  }
+}
+
+/// Struct representing the window to draw the triangle in.
+#[allow(dead_code)]
+struct HelloTriangleWindow {
+  event_loop: EventLoop<()>,
+  winit_window_surface: Arc<Surface<Window>>,
+}
+impl HelloTriangleWindow {
+  /// Create a window for the application.
+  pub fn create_vksurface_and_window(instance: &Arc<Instance>) -> HelloTriangleWindow {
+    let event_loop = EventLoop::new();
+    let winit_window_surface = WindowBuilder::new()
+      .with_title("Vulkano Vulkan Tutorial")
+      .with_inner_size(LogicalSize::new(f64::from(WIDTH), f64::from(HEIGHT)))
+      .build_vk_surface(&event_loop, instance.clone())
+      .expect("Failed to create winit window");
+
+    HelloTriangleWindow {
+      event_loop,
+      winit_window_surface,
+    }
+  }
+
+  fn run<F>(self, event_handler: F)
+  where
+    F: 'static + FnMut(Event<()>, &EventLoopWindowTarget<()>, &mut ControlFlow),
+  {
+    self.event_loop.run(event_handler);
   }
 }
 
 /// Struct representing the application to display the triangle.
+#[allow(dead_code)]
 pub struct HelloTriangleApplication {
-  window: HelloTriangleWindow,
-  #[allow(dead_code)]
   instance: Arc<Instance>,
-  #[allow(dead_code)]
   debug_callback: Option<DebugCallback>,
-  #[allow(dead_code)]
+  window_surface: HelloTriangleWindow,
   physical_device_index: usize,
-  #[allow(dead_code)]
   logical_device: Arc<Device>,
 
-  // This field, along with all the queues, might have more distinct names in a more complex
-  // system, to signify what each is really for
-  #[allow(dead_code)]
+  // These fields might have more distinct names in a more complex system, to signify what each is
+  // really for.
   graphics_queue: Arc<Queue>,
+  presentation_queue: Arc<Queue>,
 }
 impl HelloTriangleApplication {
   pub fn initialize() -> Self {
-    let window = HelloTriangleWindow::init_window();
     let instance = Self::create_vulkan_instance();
     let debug_callback = Self::setup_debug_callback_if_enabled(&instance);
-    let physical_device_index = Self::pick_physical_device(&instance);
-    let (logical_device, graphics_queue) =
-      Self::create_logical_device_and_queues(&instance, physical_device_index);
+    let window_surface = HelloTriangleWindow::create_vksurface_and_window(&instance);
+    let physical_device_index =
+      Self::pick_physical_device(&instance, &window_surface.winit_window_surface);
+    let (logical_device, graphics_queue, presentation_queue) =
+      Self::create_logical_device_and_queues(
+        &instance,
+        &window_surface.winit_window_surface,
+        physical_device_index,
+      );
 
     Self {
-      window,
       instance,
       debug_callback,
+      window_surface,
       physical_device_index,
       logical_device,
       graphics_queue,
+      presentation_queue,
     }
   }
 
@@ -206,26 +243,35 @@ impl HelloTriangleApplication {
   ///
   /// For now we'll select the first device that supports all the queue families
   /// we need.
-  fn pick_physical_device(instance: &Arc<Instance>) -> usize {
+  fn pick_physical_device(instance: &Arc<Instance>, surface: &Arc<Surface<Window>>) -> usize {
     PhysicalDevice::enumerate(instance)
-      .position(|physical_device| Self::is_device_suitable(&physical_device))
+      .position(|physical_device| Self::is_device_suitable(surface, &physical_device))
       .expect("Failed to find a suitable Physical Device!")
   }
 
-  fn is_device_suitable(physical_device: &PhysicalDevice) -> bool {
-    let feature_indices = Self::find_queue_families(physical_device);
+  /// Checks if the device has all the features and queue families needed.
+  fn is_device_suitable(surface: &Arc<Surface<Window>>, physical_device: &PhysicalDevice) -> bool {
+    let feature_indices = Self::find_queue_families(surface, physical_device);
     feature_indices.is_complete()
   }
 
   /// Returns the [QueueFamilyIndices](struct.QueueFamilyIndices.html) supported
   /// by this physical device.
+  /// Right now graphics/present queues are treated seperately, but we could try
+  /// to optimize by looking for a queue family that supports both instead of
+  /// the first of each.
   /// TODO QueueFamilyIndices member
-  fn find_queue_families(physical_device: &PhysicalDevice) -> QueueFamilyIndices {
+  fn find_queue_families(
+    surface: &Arc<Surface<Window>>, physical_device: &PhysicalDevice,
+  ) -> QueueFamilyIndices {
     let mut indices_of_queue_families_that_support_feature = QueueFamilyIndices::new();
 
     for (i, queue_family) in physical_device.queue_families().enumerate() {
       if queue_family.supports_graphics() {
         indices_of_queue_families_that_support_feature.graphics_queue_family_index = Some(i);
+      }
+      if surface.is_supported(queue_family).unwrap() {
+        indices_of_queue_families_that_support_feature.present_queue_family_index = Some(i);
       }
 
       if indices_of_queue_families_that_support_feature.is_complete() {
@@ -237,23 +283,36 @@ impl HelloTriangleApplication {
   }
 
   /// Creates the logical device from the instance and physical device index.
-  /// Returns the logical device and the graphics queue.
+  /// Returns a tuple of (Device, (graphics) Queue, (presentation) Queue).
   fn create_logical_device_and_queues(
-    instance: &Arc<Instance>, physical_device_index: usize,
-  ) -> (Arc<Device>, Arc<Queue>) {
+    instance: &Arc<Instance>, surface: &Arc<Surface<Window>>, physical_device_index: usize,
+  ) -> (Arc<Device>, Arc<Queue>, Arc<Queue>) {
     let physical_device = PhysicalDevice::from_index(instance, physical_device_index)
       .expect("Unable to get physical device at the given index");
 
-    let queue_indices = Self::find_queue_families(&physical_device);
+    let queue_indices = Self::find_queue_families(surface, &physical_device);
 
-    let graphics_queue_family_index = queue_indices
-      .graphics_queue_family_index
-      .expect("No Graphics Family Queue Index!");
-    let graphics_queue_family = physical_device
-      .queue_families()
-      .nth(graphics_queue_family_index)
-      .unwrap();
-    let graphics_queue_priority = 1.0f32;
+    // Unique queue family indices.
+    let queue_family_indices: HashSet<usize> = HashSet::from_iter(
+      [
+        queue_indices
+          .graphics_queue_family_index
+          .expect("No graphics queue family index"),
+        queue_indices
+          .present_queue_family_index
+          .expect("No present queue family index"),
+      ]
+      .iter()
+      .map(|i| *i),
+    );
+    // All queues have the same priority.
+    let queue_priority = 1.0f32;
+    let queue_families = queue_family_indices.iter().map(|&index| {
+      (
+        physical_device.queue_families().nth(index).unwrap(),
+        queue_priority,
+      )
+    });
 
     // Right now no specific features are needed, but later we'll likely need some
     // features for pipelines. When we actually start drawing, we'll also need
@@ -262,73 +321,44 @@ impl HelloTriangleApplication {
       physical_device,
       &Features::none(),
       &DeviceExtensions::none(),
-      [(graphics_queue_family, graphics_queue_priority)]
-        .iter()
-        .cloned(),
+      queue_families,
     )
     .expect("Unable to create logical device!");
 
-    (device, queues.next().unwrap())
+    let graphics_queue = queues.next().unwrap();
+    let present_queue = queues.next().unwrap_or(graphics_queue.clone());
+
+    (device, graphics_queue, present_queue)
   }
 
   /// Takes full control of the executing thread and runs the event loop for it.
   fn main_loop(self) {
-    self.window.run(move |window_event, _, control_flow| {
-      match window_event {
-        // When the window system requests a close, signal to winit that we'd like to close the
-        // window.
-        Event::WindowEvent {
-          event: WindowEvent::CloseRequested,
-          ..
-        } => *control_flow = ControlFlow::Exit,
+    self
+      .window_surface
+      .run(move |window_event, _, control_flow| {
+        match window_event {
+          // When the window system requests a close, signal to winit that we'd like to close the
+          // window.
+          Event::WindowEvent {
+            event: WindowEvent::CloseRequested,
+            ..
+          } => *control_flow = ControlFlow::Exit,
 
-        // When the keyboard input is a press on the escape key, exit and print the line.
-        Event::WindowEvent {
-          event: WindowEvent::KeyboardInput { input, .. },
-          ..
-        } => {
-          if let (Some(VirtualKeyCode::Escape), ElementState::Pressed) =
-            (input.virtual_keycode, input.state)
-          {
-            dbg!();
-            *control_flow = ControlFlow::Exit
+          // When the keyboard input is a press on the escape key, exit and print the line.
+          Event::WindowEvent {
+            event: WindowEvent::KeyboardInput { input, .. },
+            ..
+          } => {
+            if let (Some(VirtualKeyCode::Escape), ElementState::Pressed) =
+              (input.virtual_keycode, input.state)
+            {
+              dbg!();
+              *control_flow = ControlFlow::Exit
+            }
           }
+          _ => (),
         }
-        _ => (),
-      }
-    });
-  }
-}
-
-/// Struct representing the window to draw the triangle in.
-struct HelloTriangleWindow {
-  event_loop: EventLoop<()>,
-  // allow dead_code because the window is kept around for its destructor to kill the window.
-  #[allow(dead_code)]
-  winit_window: Window,
-}
-
-impl HelloTriangleWindow {
-  /// Create a window for the application.
-  pub fn init_window() -> HelloTriangleWindow {
-    let event_loop = EventLoop::new();
-    let winit_window = WindowBuilder::new()
-      .with_title("Vulkano Vulkan Tutorial")
-      .with_inner_size(LogicalSize::new(f64::from(WIDTH), f64::from(HEIGHT)))
-      .build(&event_loop)
-      .expect("Failed to create winit window");
-
-    HelloTriangleWindow {
-      event_loop,
-      winit_window,
-    }
-  }
-
-  fn run<F>(self, event_handler: F)
-  where
-    F: 'static + FnMut(Event<()>, &EventLoopWindowTarget<()>, &mut ControlFlow),
-  {
-    self.event_loop.run(event_handler);
+      });
   }
 }
 
