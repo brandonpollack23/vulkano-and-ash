@@ -6,7 +6,7 @@ use vulkano::{
     debug::{DebugCallback, MessageSeverity, MessageType},
     layers_list, ApplicationInfo, Instance, InstanceExtensions, PhysicalDevice, Version,
   },
-  swapchain::Surface,
+  swapchain::{Capabilities, Surface},
 };
 use vulkano_win::VkSurfaceBuild;
 use winit::{
@@ -20,6 +20,13 @@ const VALIDATION_LAYERS: &[&str] = &["VK_LAYER_LUNARG_standard_validation"];
 
 const WIDTH: u32 = 800;
 const HEIGHT: u32 = 600;
+
+fn required_device_extensions() -> DeviceExtensions {
+  DeviceExtensions {
+    khr_swapchain: true,
+    ..DeviceExtensions::none()
+  }
+}
 
 #[cfg(all(debug_assertions))]
 const ENABLE_VALIDATION_LAYERS: bool = true;
@@ -118,13 +125,13 @@ impl HelloTriangleApplication {
       panic!("Validation layers requested, but not available!");
     }
 
-    Self::print_supported_extensions();
+    Self::print_supported_instance_extensions();
     let extensions = if ENABLE_VALIDATION_LAYERS {
-      Self::get_required_extensions()
+      Self::get_required_instance_extensions()
     } else {
       vulkano_win::required_extensions()
     };
-    println!("Required Extensions:\n\t{:?}\n", extensions);
+    println!("Required Instance Extensions:\n\t{:?}\n", extensions);
 
     let app_info = ApplicationInfo {
       application_name: Some("Hello Triangle".into()),
@@ -165,7 +172,7 @@ impl HelloTriangleApplication {
       .all(|layer_name| layers.contains(&layer_name.to_string()))
   }
 
-  fn get_required_extensions() -> InstanceExtensions {
+  fn get_required_instance_extensions() -> InstanceExtensions {
     let mut extensions = vulkano_win::required_extensions();
 
     if ENABLE_VALIDATION_LAYERS {
@@ -177,10 +184,13 @@ impl HelloTriangleApplication {
     extensions
   }
 
-  fn print_supported_extensions() {
+  fn print_supported_instance_extensions() {
     let supported_extensions =
       InstanceExtensions::supported_by_core().expect("failed to retrieve supported extensions");
-    println!("Supported Extensions:\n\t{:?}", supported_extensions);
+    println!(
+      "Supported Instance Extensions:\n\t{:?}",
+      supported_extensions
+    );
   }
 
   fn setup_debug_callback_if_enabled(instance: &Arc<Instance>) -> Option<DebugCallback> {
@@ -251,8 +261,26 @@ impl HelloTriangleApplication {
 
   /// Checks if the device has all the features and queue families needed.
   fn is_device_suitable(surface: &Arc<Surface<Window>>, physical_device: &PhysicalDevice) -> bool {
-    let feature_indices = Self::find_queue_families(surface, physical_device);
-    feature_indices.is_complete()
+    // Supports all queue families we need.
+    let queue_family_indices = Self::find_queue_families(surface, physical_device);
+    // Supports all the extensions we need (such as VK_KHR_swapchain)
+    let device_extensions_supported = Self::are_all_required_extensions_supported(physical_device);
+
+    // Swap chain is adequate for vulkan-tutorial if it has at least one supported
+    // image format and one supported presentation mode for the given surface.
+    let swap_chain_adequate = if device_extensions_supported {
+      // This capabilities struct contains everything laid out in
+      // SwapChainSupportDetails (and more) from the vulkan-tutorial.
+      let capabilities = surface
+        .capabilities(*physical_device)
+        .expect("Could not query surface capabilities");
+      !capabilities.supported_formats.is_empty()
+        && capabilities.present_modes.iter().next().is_some()
+    } else {
+      false
+    };
+
+    queue_family_indices.is_complete() && device_extensions_supported && swap_chain_adequate
   }
 
   /// Returns the [QueueFamilyIndices](struct.QueueFamilyIndices.html) supported
@@ -280,6 +308,18 @@ impl HelloTriangleApplication {
     }
 
     indices_of_queue_families_that_support_feature
+  }
+
+  fn are_all_required_extensions_supported(device: &PhysicalDevice) -> bool {
+    let available_device_extensions = DeviceExtensions::supported_by_device(*device);
+    let required_device_extensions = required_device_extensions();
+    println!(
+      "Supported Device Extensions:\n\t{:?}\nRequired Device Extensions:\n\t{:?}",
+      available_device_extensions, required_device_extensions
+    );
+
+    available_device_extensions.intersection(&required_device_extensions)
+      == required_device_extensions
   }
 
   /// Creates the logical device from the instance and physical device index.
@@ -320,7 +360,7 @@ impl HelloTriangleApplication {
     let (device, mut queues) = Device::new(
       physical_device,
       &Features::none(),
-      &DeviceExtensions::none(),
+      &required_device_extensions(),
       queue_families,
     )
     .expect("Unable to create logical device!");
