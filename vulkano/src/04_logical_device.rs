@@ -82,6 +82,12 @@ impl HelloTriangleApplication {
     }
 
     Self::print_supported_extensions();
+    let extensions = if ENABLE_VALIDATION_LAYERS {
+      Self::get_required_extensions()
+    } else {
+      vulkano_win::required_extensions()
+    };
+    println!("Required Extensions:\n\t{:?}\n", extensions);
 
     let app_info = ApplicationInfo {
       application_name: Some("Hello Triangle".into()),
@@ -97,17 +103,12 @@ impl HelloTriangleApplication {
     // In vulkano we use "new" static factory methods to construct vkInstance and
     // other vulkan objects instead of passing all the params in a create_info
     // struct.
-    if ENABLE_VALIDATION_LAYERS {
-      Instance::new(
-        Some(&app_info),
-        &Self::get_required_extensions(),
-        VALIDATION_LAYERS.iter().cloned(),
-      )
-      .expect("Failed to create Vulkan instance")
-    } else {
-      Instance::new(Some(&app_info), &vulkano_win::required_extensions(), None)
-        .expect("Failed to create Vulkan instance")
-    }
+    Instance::new(
+      Some(&app_info),
+      &extensions,
+      VALIDATION_LAYERS.iter().cloned(),
+    )
+    .expect("Failed to create Vulkan instance")
   }
 
   fn check_and_print_validation_layer_support() -> bool {
@@ -142,7 +143,7 @@ impl HelloTriangleApplication {
   fn print_supported_extensions() {
     let supported_extensions =
       InstanceExtensions::supported_by_core().expect("failed to retrieve supported extensions");
-    println!("Supported Extensions:\n\t{:?}\n", supported_extensions);
+    println!("Supported Extensions:\n\t{:?}", supported_extensions);
   }
 
   fn setup_debug_callback_if_enabled(instance: &Arc<Instance>) -> Option<DebugCallback> {
