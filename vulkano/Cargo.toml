@@ -17,16 +17,20 @@ name = "validation_layers_vulkano"
 path = "src/02_validation_layers.rs"
 
 [[bin]]
-name = "physical_device_selection"
+name = "physical_device_selection_vulkano"
 path = "src/03_physical_device_selection.rs"
 
 [[bin]]
-name = "logical_device"
+name = "logical_device_vulkano"
 path = "src/04_logical_device.rs"
 
 [[bin]]
-name = "window_surface"
+name = "window_surface_vulkano"
 path = "src/05_window_surface.rs"
+
+[[bin]]
+name = "swap_chain_vulkano"
+path = "src/06_swap_chain.rs"
 
 [dependencies]
 vulkano = "0.17.0"
