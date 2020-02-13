@@ -131,7 +131,7 @@ impl HelloTriangleApplication {
 
     // In a real implementation, we may have more than one pipeline for different
     // passes or processes, but in vulkan-tutorial only one.
-    Self::create_graphics_pipeline();
+    Self::create_graphics_pipeline(&logical_device);
 
     Self {
       instance,
@@ -375,10 +375,44 @@ impl HelloTriangleApplication {
   /// fragment, geometry?), this at compile time in this example, but
   /// [can be done at runtime](https://github.com/vulkano-rs/vulkano/blob/master/examples/src/bin/runtime-shader/main.rs),
   /// and setting up all the fixed stages (IA, R, etc)
-  fn create_graphics_pipeline() {
+  fn create_graphics_pipeline(logical_device: &Arc<Device>) {
     // I will be compiling the shaders at compile time in rust using macros
     // provided by Vulkano. As in vulkan-tutorial, this can be done at runtime
     // (see vs and fs initialization [here](https://github.com/vulkano-rs/vulkano/blob/master/examples/src/bin/runtime-shader/main.rs).
+
+    // The vulkano_shaders::shader! macro generates a bunch of structs, etc with
+    // common names so we need to wrap them in their own namespace to reference
+    // here.  These structs contain the compiled spirv shader code we can load.
+    //
+    // To use it, we just call the NAMESPACE_NAME::Shader::load(logical_device)
+    //
+    // Once pipeline creation is finished, we can destroy the Shader (and contained
+    // vulkano::ShaderModule/vk::ShaderModule structs) since the spirv will now be
+    // copied into the driver.
+    mod vertex_shader {
+      vulkano_shaders::shader! {
+        ty: "vertex",
+        path: "../shaders/09_shader_base.vert"
+      }
+    }
+
+    mod fragment_shader {
+      vulkano_shaders::shader! {
+        ty: "fragment",
+        path: "../shaders/09_shader_base.frag"
+      }
+    }
+
+    let _vert_shader_module = vertex_shader::Shader::load(logical_device.clone())
+      .expect("Failed to create vertex shader module");
+
+    let _frag_shader_module = fragment_shader::Shader::load(logical_device.clone())
+      .expect("Failed to create fragment shader module");
+
+    // In vulkan-tutorial (and in c++ in general) you need to assign shaders to
+    // a specific stage via VkPipelineShadersStageCreateInfo, but vulkano
+    // handles that for us later on in the
+    // [pipeline_builder](https://github.com/vulkano-rs/vulkano/blob/e09588bebfe328e6f984bd885ae9311eaa909d41/vulkano/src/pipeline/graphics_pipeline/builder.rs#L436)
   }
 
   fn check_and_print_validation_layer_support() -> bool {
