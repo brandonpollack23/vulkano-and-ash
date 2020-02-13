@@ -118,9 +118,9 @@ impl HelloTriangleApplication {
       );
     let (swap_chain, swap_chain_images) = Self::create_swap_chain(
       &instance,
-      &window_surface,
+      &window_surface.winit_window_surface,
       physical_device_index,
-      &device,
+      &logical_device,
       &graphics_queue,
       &presentation_queue,
     );
@@ -133,6 +133,8 @@ impl HelloTriangleApplication {
       logical_device,
       graphics_queue,
       presentation_queue,
+      swap_chain,
+      swap_chain_images,
     }
   }
 
@@ -333,7 +335,7 @@ impl HelloTriangleApplication {
     let available_device_extensions = DeviceExtensions::supported_by_device(*device);
     let required_device_extensions = required_device_extensions();
     println!(
-      "Supported Device Extensions:\n\t{:?}\nRequired Device Extensions:\n\t{:?}",
+      "Supported Device Extensions:\n\t{:?}\nRequired Device Extensions:\n\t{:?}\n",
       available_device_extensions, required_device_extensions
     );
 
@@ -430,8 +432,14 @@ impl HelloTriangleApplication {
       // SharingMode implements From (and derives Into) for &[&Arc<Queue>], so we can
       // just use this to derive VK_SHARING_MODE_CONCURRENT as well as the
       // queueFamilyIndexCount/Indices
-      vec![present_queue, graphics_queue].into()
+      vec![present_queue, graphics_queue].as_slice().into()
     };
+
+    println!(
+      "Creating Swapchain:\n\timage_count: {}\n\textent: {:?}\n\tpresent_mode \
+       {:?}\n\tsurface_format: {:?}",
+      image_count, extent, present_mode, surface_format
+    );
 
     Swapchain::new(
       logical_device.clone(),
