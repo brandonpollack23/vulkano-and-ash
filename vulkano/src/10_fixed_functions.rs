@@ -8,6 +8,7 @@ use vulkano::{
     debug::{DebugCallback, MessageSeverity, MessageType},
     layers_list, ApplicationInfo, Instance, InstanceExtensions, PhysicalDevice, Version,
   },
+  pipeline::{vertex::BufferlessDefinition, GraphicsPipeline},
   swapchain::{
     Capabilities, ColorSpace, CompositeAlpha, FullscreenExclusive, PresentMode,
     SupportedPresentModes, Surface, Swapchain,
@@ -57,7 +58,6 @@ impl QueueFamilyIndices {
 }
 
 /// Struct representing the window to draw the triangle in.
-#[allow(dead_code)]
 struct HelloTriangleWindow {
   event_loop: EventLoop<()>,
   winit_window_surface: Arc<Surface<Window>>,
@@ -403,16 +403,37 @@ impl HelloTriangleApplication {
       }
     }
 
-    let _vert_shader_module = vertex_shader::Shader::load(logical_device.clone())
+    let vert_shader_module = vertex_shader::Shader::load(logical_device.clone())
       .expect("Failed to create vertex shader module");
 
-    let _frag_shader_module = fragment_shader::Shader::load(logical_device.clone())
+    let frag_shader_module = fragment_shader::Shader::load(logical_device.clone())
       .expect("Failed to create fragment shader module");
 
     // In vulkan-tutorial (and in c++ in general) you need to assign shaders to
     // a specific stage via VkPipelineShadersStageCreateInfo, but vulkano
     // handles that for us later on in the
     // [pipeline_builder](https://github.com/vulkano-rs/vulkano/blob/e09588bebfe328e6f984bd885ae9311eaa909d41/vulkano/src/pipeline/graphics_pipeline/builder.rs#L436)
+
+    // As vulkan-tutorial says, we need to be explicit about everything, but rather
+    // than make a huge create info for each type, Vulkano provides some sane
+    // defaults it seems.
+    //
+    // Input assembly is set to a default of triangle topology with no restart by
+    // Vulkano.  Primitive restart is for _STRIP type primitives (to "restart" the
+    // strip with a value of 0xFFFFFFFF, ie have multiple strips in one buffer).
+    //
+    //
+    let _pipeline_builder = Arc::new(
+      GraphicsPipeline::start()
+          .vertex_input(BufferlessDefinition {}) /* I'm not using any buffers for vertex input, so 
+                                                    no need to specify vertex attribute descriptions--type of attributes passed in vertex 
+                                                    shader, which binding to load them from and at which offset--or vertex binding 
+                                                    descriptions--spacing between data and whether data is per vertex or per instance 
+                                                    (vkPipelineVertexInputStateCreateInfo fields).*/
+          .vertex_shader(vert_shader_module.main_entry_point(), ()) /* Vertex shader and any defined constants. */
+          .triangle_list() // TODO remove?
+          .primitive_restart(false),
+    );
   }
 
   fn check_and_print_validation_layer_support() -> bool {
