@@ -2,6 +2,8 @@ After the tutorials are finished, I'll add my own "chapters" that will include
 the following:
 
 ## Create a new final project for vulkano that organizes things effectively and is more modular
+* Extract classes
+* create_swap_chain sub functions?
 
 ## Replace prints with logging (and make an async logger?)
 
