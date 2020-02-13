@@ -408,6 +408,11 @@ impl HelloTriangleApplication {
 
     let _frag_shader_module = fragment_shader::Shader::load(logical_device.clone())
       .expect("Failed to create fragment shader module");
+
+    // In vulkan-tutorial (and in c++ in general) you need to assign shaders to
+    // a specific stage via VkPipelineShadersStageCreateInfo, but vulkano
+    // handles that for us later on in the
+    // [pipeline_builder](https://github.com/vulkano-rs/vulkano/blob/e09588bebfe328e6f984bd885ae9311eaa909d41/vulkano/src/pipeline/graphics_pipeline/builder.rs#L436)
   }
 
   fn check_and_print_validation_layer_support() -> bool {
