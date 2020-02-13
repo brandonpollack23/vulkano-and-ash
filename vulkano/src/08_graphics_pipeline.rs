@@ -129,6 +129,10 @@ impl HelloTriangleApplication {
       &presentation_queue,
     );
 
+    // In a real implementation, we may have more than one pipeline for different
+    // passes or processes, but in vulkan-tutorial only one.
+    Self::create_graphics_pipeline();
+
     Self {
       instance,
       debug_callback,
@@ -366,6 +370,8 @@ impl HelloTriangleApplication {
     )
     .expect("Unable to create swapchain!")
   }
+
+  fn create_graphics_pipeline() {}
 
   fn check_and_print_validation_layer_support() -> bool {
     let layers: Vec<_> = layers_list()
