@@ -2,11 +2,17 @@ use std::{collections::HashSet, iter::FromIterator, sync::Arc};
 use vulkano::{
   self,
   device::{Device, DeviceExtensions, Features, Queue},
+  format::Format,
+  image::{ImageUsage, SwapchainImage},
   instance::{
     debug::{DebugCallback, MessageSeverity, MessageType},
     layers_list, ApplicationInfo, Instance, InstanceExtensions, PhysicalDevice, Version,
   },
-  swapchain::{Capabilities, Surface},
+  swapchain::{
+    Capabilities, ColorSpace, CompositeAlpha, FullscreenExclusive, PresentMode,
+    SupportedPresentModes, Surface, Swapchain,
+  },
+  sync::SharingMode,
 };
 use vulkano_win::VkSurfaceBuild;
 use winit::{
@@ -93,9 +99,12 @@ pub struct HelloTriangleApplication {
   // really for.
   graphics_queue: Arc<Queue>,
   presentation_queue: Arc<Queue>,
+
+  swap_chain: Arc<Swapchain<Window>>,
+  swap_chain_images: Vec<Arc<SwapchainImage<Window>>>,
 }
 impl HelloTriangleApplication {
-  pub fn initialize() -> Self {
+  fn initialize() -> Self {
     let instance = Self::create_vulkan_instance();
     let debug_callback = Self::setup_debug_callback_if_enabled(&instance);
     let window_surface = HelloTriangleWindow::create_vksurface_and_window(&instance);
@@ -107,6 +116,14 @@ impl HelloTriangleApplication {
         &window_surface.winit_window_surface,
         physical_device_index,
       );
+    let (swap_chain, swap_chain_images) = Self::create_swap_chain(
+      &instance,
+      &window_surface,
+      physical_device_index,
+      &device,
+      &graphics_queue,
+      &presentation_queue,
+    );
 
     Self {
       instance,
@@ -251,8 +268,8 @@ impl HelloTriangleApplication {
   /// * Check for most wanted features and pick the best possible GPU with a
   ///   priority or score.
   ///
-  /// For now we'll select the first device that supports all the queue families
-  /// we need.
+  /// For now we'll select the first device that supports all the queue
+  /// families, extensions, and surface capabilities we need.
   fn pick_physical_device(instance: &Arc<Instance>, surface: &Arc<Surface<Window>>) -> usize {
     PhysicalDevice::enumerate(instance)
       .position(|physical_device| Self::is_device_suitable(surface, &physical_device))
@@ -310,6 +327,8 @@ impl HelloTriangleApplication {
     indices_of_queue_families_that_support_feature
   }
 
+  /// Check all the extensions defined by required_device_extensions() are
+  /// supported by the device.
   fn are_all_required_extensions_supported(device: &PhysicalDevice) -> bool {
     let available_device_extensions = DeviceExtensions::supported_by_device(*device);
     let required_device_extensions = required_device_extensions();
@@ -369,6 +388,115 @@ impl HelloTriangleApplication {
     let present_queue = queues.next().unwrap_or(graphics_queue.clone());
 
     (device, graphics_queue, present_queue)
+  }
+
+  /// Create the swap chain and it's images for the surface.
+  fn create_swap_chain(
+    instance: &Arc<Instance>, surface: &Arc<Surface<Window>>, physical_device_index: usize,
+    logical_device: &Arc<Device>, graphics_queue: &Arc<Queue>, present_queue: &Arc<Queue>,
+  ) -> (Arc<Swapchain<Window>>, Vec<Arc<SwapchainImage<Window>>>) {
+    let physical_device = PhysicalDevice::from_index(instance, physical_device_index).unwrap();
+    let capabilities = surface
+      .capabilities(physical_device)
+      .expect("Failed to get surface capabilities");
+
+    let surface_format = Self::choose_swap_surface_format(&capabilities.supported_formats);
+    let present_mode = Self::choose_swap_present_mode(capabilities.present_modes);
+    let extent = Self::choose_swap_extent(&capabilities);
+
+    // For now use the minimum number of images required for the surface to function
+    // plus one (so we don't have to wait) but only if it is less than the max.
+    let image_count = capabilities
+      .max_image_count
+      .map(|max_count| max_count.min(capabilities.min_image_count + 1))
+      .unwrap_or(capabilities.min_image_count + 1);
+
+    // We're rendering directly to images so the color attachment is used.
+    let image_usage = ImageUsage {
+      color_attachment: true,
+      ..ImageUsage::none()
+    };
+
+    // Next we need to decide how queues will be shared across families (if they
+    // are separate families). Exclusive offers the best performance, but if we
+    // have separate families for present and graphics queues that are going to be
+    // used by the swapchain, we need to use Concurrent mode.
+    let queue_family_indices = Self::find_queue_families(surface, &physical_device);
+    let sharing_mode = if queue_family_indices.present_queue_family_index.unwrap()
+      == queue_family_indices.graphics_queue_family_index.unwrap()
+    {
+      SharingMode::Exclusive
+    } else {
+      // SharingMode implements From (and derives Into) for &[&Arc<Queue>], so we can
+      // just use this to derive VK_SHARING_MODE_CONCURRENT as well as the
+      // queueFamilyIndexCount/Indices
+      vec![present_queue, graphics_queue].into()
+    };
+
+    Swapchain::new(
+      logical_device.clone(),
+      surface.clone(),
+      image_count,
+      surface_format.0,
+      extent,
+      1, // 1 layer, more would be for images with multiple layers like stereoscopic 3d.
+      image_usage,
+      sharing_mode,
+      capabilities.current_transform, /* A swapchain can apply an overall transform to an image,
+                                       * like rotation or flip.  No need to do that so just use
+                                       * the current transform of the capabilities. */
+      CompositeAlpha::Opaque, // Dont blend with other windows in the window system.
+      present_mode,
+      FullscreenExclusive::Default, // TODO what does this do?
+      true,                         /* clipped, no need to draw pixels that are obscured (by
+                                     * another window or off the
+                                     * screen) */
+      surface_format.1,
+    )
+    .expect("Unable to create swapchain!")
+  }
+
+  /// Choose the [format](https://www.khronos.org/registry/vulkan/specs/1.2-khr-extensions/html/chap33.html#VkFormat)
+  /// and [color space](https://www.khronos.org/registry/vulkan/specs/1.2-khr-extensions/html/chap29.html#VkColorSpaceKHR)
+  /// we want to draw to the surface.  A format is the layout of the pixels for
+  /// a color (eg R8G8B8 etc).  A ColorSpace is a form of sRGB to determine
+  /// the true color from the digital color.
+  ///
+  /// For the purposes of vulkan-tutorial, we want B8G8R8A8_SRGB format and
+  /// VK_COLOR_SPACE_NONLINEAR_KHR for colorspace.
+  fn choose_swap_surface_format(
+    available_formats: &[(Format, ColorSpace)],
+  ) -> (Format, ColorSpace) {
+    *available_formats
+      .iter()
+      .find(|(format, colorspace)| {
+        *format == Format::B8G8R8A8Srgb && *colorspace == ColorSpace::SrgbNonLinear
+      })
+      .unwrap_or(&available_formats[0])
+  }
+
+  /// Selects mailbox if available (double buffer with replacement aka triple
+  /// buffer) otherwise just regular FIFO (double buffer).
+  fn choose_swap_present_mode(available_present_modes: SupportedPresentModes) -> PresentMode {
+    if available_present_modes.mailbox {
+      PresentMode::Mailbox
+    } else {
+      // Fifo is guaranteed to be available.
+      PresentMode::Fifo
+    }
+  }
+
+  fn choose_swap_extent(capabilities: &Capabilities) -> [u32; 2] {
+    if let Some(current_extent) = capabilities.current_extent {
+      return current_extent;
+    }
+
+    // The window manager indicates we can set the extent to our liking, lets set it
+    // to the window dimensions clamped to the min and max supported by the surface.
+    [
+      capabilities.min_image_extent[0].max(capabilities.max_image_extent[0].min(WIDTH)),
+      capabilities.min_image_extent[1].max(capabilities.max_image_extent[1].min(HEIGHT)),
+    ]
   }
 
   /// Takes full control of the executing thread and runs the event loop for it.
