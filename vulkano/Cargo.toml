@@ -46,6 +46,7 @@ path = "src/09_shader_modules.rs"
 
 [dependencies]
 vulkano = "0.17.0"
+vulkano-shaders = "0.17.0"
 winit = "0.21.0"
 # link between vulkano and winit, used for required_extensions
 vulkano-win = "0.17.0"
