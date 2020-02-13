@@ -74,7 +74,9 @@ impl HelloTriangleApplication {
       engine_version: None,
     };
 
-    // In vulkano we use "new" static factory methods to construct vkInstance and other vulkan objects instead of passing all the params in a create_info struct.
+    // In vulkano we use "new" static factory methods to construct vkInstance and
+    // other vulkan objects instead of passing all the params in a create_info
+    // struct.
     Instance::new(Some(&app_info), &vulkano_win::required_extensions(), None)
       .expect("Failed to create Vulkan instance")
   }
@@ -89,7 +91,8 @@ impl HelloTriangleApplication {
   fn main_loop(self) {
     self.window.run(move |window_event, _, control_flow| {
       match window_event {
-        // When the window system requests a close, signal to winit that we'd like to close the window.
+        // When the window system requests a close, signal to winit that we'd like to close the
+        // window.
         Event::WindowEvent {
           event: WindowEvent::CloseRequested,
           ..

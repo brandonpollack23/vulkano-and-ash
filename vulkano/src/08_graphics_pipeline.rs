@@ -371,7 +371,15 @@ impl HelloTriangleApplication {
     .expect("Unable to create swapchain!")
   }
 
-  fn create_graphics_pipeline() {}
+  /// Create the graphics pipeline by compiling all the shaders (vertex,
+  /// fragment, geometry?), this at compile time in this example, but
+  /// [can be done at runtime](https://github.com/vulkano-rs/vulkano/blob/master/examples/src/bin/runtime-shader/main.rs),
+  /// and setting up all the fixed stages (IA, R, etc)
+  fn create_graphics_pipeline() {
+    // I will be compiling the shaders at compile time in rust using macros
+    // provided by Vulkano. As in vulkan-tutorial, this can be done at runtime
+    // (see vs and fs initialization [here](https://github.com/vulkano-rs/vulkano/blob/master/examples/src/bin/runtime-shader/main.rs).
+  }
 
   fn check_and_print_validation_layer_support() -> bool {
     let layers: Vec<_> = layers_list()

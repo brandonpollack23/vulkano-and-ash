@@ -57,7 +57,8 @@ impl HelloTriangleApplication {
   fn main_loop(self) {
     self.window.run(move |window_event, _, control_flow| {
       match window_event {
-        // When the window system requests a close, signal to winit that we'd like to close the window.
+        // When the window system requests a close, signal to winit that we'd like to close the
+        // window.
         Event::WindowEvent {
           event: WindowEvent::CloseRequested,
           ..
