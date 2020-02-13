@@ -174,44 +174,6 @@ impl HelloTriangleApplication {
     .expect("Failed to create Vulkan instance")
   }
 
-  fn check_and_print_validation_layer_support() -> bool {
-    let layers: Vec<_> = layers_list()
-      .expect("Could not get available layers")
-      .map(|l| l.name().to_owned())
-      .collect();
-
-    println!(
-      "Supported Validation Layers: \n\t{:?}\nRequested Validation Layers \n\t{:?}\n",
-      layers, VALIDATION_LAYERS
-    );
-
-    // Ensure all the Validation layers we require
-    VALIDATION_LAYERS
-      .iter()
-      .all(|layer_name| layers.contains(&layer_name.to_string()))
-  }
-
-  fn get_required_instance_extensions() -> InstanceExtensions {
-    let mut extensions = vulkano_win::required_extensions();
-
-    if ENABLE_VALIDATION_LAYERS {
-      // No need to check for the existence of this extension because the validation
-      // layers being present already confirms it.
-      extensions.ext_debug_utils = true;
-    }
-
-    extensions
-  }
-
-  fn print_supported_instance_extensions() {
-    let supported_extensions =
-      InstanceExtensions::supported_by_core().expect("failed to retrieve supported extensions");
-    println!(
-      "Supported Instance Extensions:\n\t{:?}",
-      supported_extensions
-    );
-  }
-
   fn setup_debug_callback_if_enabled(instance: &Arc<Instance>) -> Option<DebugCallback> {
     if !ENABLE_VALIDATION_LAYERS {
       return None;
@@ -276,71 +238,6 @@ impl HelloTriangleApplication {
     PhysicalDevice::enumerate(instance)
       .position(|physical_device| Self::is_device_suitable(surface, &physical_device))
       .expect("Failed to find a suitable Physical Device!")
-  }
-
-  /// Checks if the device has all the features and queue families needed.
-  fn is_device_suitable(surface: &Arc<Surface<Window>>, physical_device: &PhysicalDevice) -> bool {
-    // Supports all queue families we need.
-    let queue_family_indices = Self::find_queue_families(surface, physical_device);
-    // Supports all the extensions we need (such as VK_KHR_swapchain)
-    let device_extensions_supported = Self::are_all_required_extensions_supported(physical_device);
-
-    // Swap chain is adequate for vulkan-tutorial if it has at least one supported
-    // image format and one supported presentation mode for the given surface.
-    let swap_chain_adequate = if device_extensions_supported {
-      // This capabilities struct contains everything laid out in
-      // SwapChainSupportDetails (and more) from the vulkan-tutorial.
-      let capabilities = surface
-        .capabilities(*physical_device)
-        .expect("Could not query surface capabilities");
-      !capabilities.supported_formats.is_empty()
-        && capabilities.present_modes.iter().next().is_some()
-    } else {
-      false
-    };
-
-    queue_family_indices.is_complete() && device_extensions_supported && swap_chain_adequate
-  }
-
-  /// Returns the [QueueFamilyIndices](struct.QueueFamilyIndices.html) supported
-  /// by this physical device.
-  /// Right now graphics/present queues are treated seperately, but we could try
-  /// to optimize by looking for a queue family that supports both instead of
-  /// the first of each.
-  /// TODO QueueFamilyIndices member
-  fn find_queue_families(
-    surface: &Arc<Surface<Window>>, physical_device: &PhysicalDevice,
-  ) -> QueueFamilyIndices {
-    let mut indices_of_queue_families_that_support_feature = QueueFamilyIndices::new();
-
-    for (i, queue_family) in physical_device.queue_families().enumerate() {
-      if queue_family.supports_graphics() {
-        indices_of_queue_families_that_support_feature.graphics_queue_family_index = Some(i);
-      }
-      if surface.is_supported(queue_family).unwrap() {
-        indices_of_queue_families_that_support_feature.present_queue_family_index = Some(i);
-      }
-
-      if indices_of_queue_families_that_support_feature.is_complete() {
-        break;
-      }
-    }
-
-    indices_of_queue_families_that_support_feature
-  }
-
-  /// Check all the extensions defined by required_device_extensions() are
-  /// supported by the device.
-  fn are_all_required_extensions_supported(device: &PhysicalDevice) -> bool {
-    let available_device_extensions = DeviceExtensions::supported_by_device(*device);
-    let required_device_extensions = required_device_extensions();
-    println!(
-      "Supported Device Extensions:\n\t{:?}\nRequired Device Extensions:\n\t{:?}\n",
-      available_device_extensions, required_device_extensions
-    );
-
-    available_device_extensions.intersection(&required_device_extensions)
-      == required_device_extensions
   }
 
   /// Creates the logical device from the instance and physical device index.
@@ -464,6 +361,109 @@ impl HelloTriangleApplication {
       surface_format.1, // ColorSpace
     )
     .expect("Unable to create swapchain!")
+  }
+
+  fn check_and_print_validation_layer_support() -> bool {
+    let layers: Vec<_> = layers_list()
+      .expect("Could not get available layers")
+      .map(|l| l.name().to_owned())
+      .collect();
+
+    println!(
+      "Supported Validation Layers: \n\t{:?}\nRequested Validation Layers \n\t{:?}\n",
+      layers, VALIDATION_LAYERS
+    );
+
+    // Ensure all the Validation layers we require
+    VALIDATION_LAYERS
+      .iter()
+      .all(|layer_name| layers.contains(&layer_name.to_string()))
+  }
+
+  fn get_required_instance_extensions() -> InstanceExtensions {
+    let mut extensions = vulkano_win::required_extensions();
+
+    if ENABLE_VALIDATION_LAYERS {
+      // No need to check for the existence of this extension because the validation
+      // layers being present already confirms it.
+      extensions.ext_debug_utils = true;
+    }
+
+    extensions
+  }
+
+  fn print_supported_instance_extensions() {
+    let supported_extensions =
+      InstanceExtensions::supported_by_core().expect("failed to retrieve supported extensions");
+    println!(
+      "Supported Instance Extensions:\n\t{:?}",
+      supported_extensions
+    );
+  }
+
+  /// Checks if the device has all the features and queue families needed.
+  fn is_device_suitable(surface: &Arc<Surface<Window>>, physical_device: &PhysicalDevice) -> bool {
+    // Supports all queue families we need.
+    let queue_family_indices = Self::find_queue_families(surface, physical_device);
+    // Supports all the extensions we need (such as VK_KHR_swapchain)
+    let device_extensions_supported = Self::are_all_required_extensions_supported(physical_device);
+
+    // Swap chain is adequate for vulkan-tutorial if it has at least one supported
+    // image format and one supported presentation mode for the given surface.
+    let swap_chain_adequate = if device_extensions_supported {
+      // This capabilities struct contains everything laid out in
+      // SwapChainSupportDetails (and more) from the vulkan-tutorial.
+      let capabilities = surface
+        .capabilities(*physical_device)
+        .expect("Could not query surface capabilities");
+      !capabilities.supported_formats.is_empty()
+        && capabilities.present_modes.iter().next().is_some()
+    } else {
+      false
+    };
+
+    queue_family_indices.is_complete() && device_extensions_supported && swap_chain_adequate
+  }
+
+  /// Returns the [QueueFamilyIndices](struct.QueueFamilyIndices.html) supported
+  /// by this physical device.
+  /// Right now graphics/present queues are treated seperately, but we could try
+  /// to optimize by looking for a queue family that supports both instead of
+  /// the first of each.
+  /// TODO QueueFamilyIndices member
+  fn find_queue_families(
+    surface: &Arc<Surface<Window>>, physical_device: &PhysicalDevice,
+  ) -> QueueFamilyIndices {
+    let mut indices_of_queue_families_that_support_feature = QueueFamilyIndices::new();
+
+    for (i, queue_family) in physical_device.queue_families().enumerate() {
+      if queue_family.supports_graphics() {
+        indices_of_queue_families_that_support_feature.graphics_queue_family_index = Some(i);
+      }
+      if surface.is_supported(queue_family).unwrap() {
+        indices_of_queue_families_that_support_feature.present_queue_family_index = Some(i);
+      }
+
+      if indices_of_queue_families_that_support_feature.is_complete() {
+        break;
+      }
+    }
+
+    indices_of_queue_families_that_support_feature
+  }
+
+  /// Check all the extensions defined by required_device_extensions() are
+  /// supported by the device.
+  fn are_all_required_extensions_supported(device: &PhysicalDevice) -> bool {
+    let available_device_extensions = DeviceExtensions::supported_by_device(*device);
+    let required_device_extensions = required_device_extensions();
+    println!(
+      "Supported Device Extensions:\n\t{:?}\nRequired Device Extensions:\n\t{:?}\n",
+      available_device_extensions, required_device_extensions
+    );
+
+    available_device_extensions.intersection(&required_device_extensions)
+      == required_device_extensions
   }
 
   /// Choose the [format](https://www.khronos.org/registry/vulkan/specs/1.2-khr-extensions/html/chap33.html#VkFormat)
