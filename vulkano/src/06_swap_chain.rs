@@ -445,21 +445,23 @@ impl HelloTriangleApplication {
       logical_device.clone(),
       surface.clone(),
       image_count,
-      surface_format.0,
+      surface_format.0, // Pixel Data Format
       extent,
-      1, // 1 layer, more would be for images with multiple layers like stereoscopic 3d.
-      image_usage,
-      sharing_mode,
+      1,           // 1 layer, more would be for images with multiple layers like stereoscopic 3d.
+      image_usage, // Using the images for drawing to.
+      sharing_mode, /* Whether or not we are sharing queue families (concurrent) or not
+                    * (exclusive). */
       capabilities.current_transform, /* A swapchain can apply an overall transform to an image,
                                        * like rotation or flip.  No need to do that so just use
                                        * the current transform of the capabilities. */
       CompositeAlpha::Opaque, // Dont blend with other windows in the window system.
-      present_mode,
+      present_mode,           /* What type of present mode we're doing (immediate, fifo, fifo
+                               * messagebox etc). */
       FullscreenExclusive::Default, // TODO what does this do?
       true,                         /* clipped, no need to draw pixels that are obscured (by
                                      * another window or off the
                                      * screen) */
-      surface_format.1,
+      surface_format.1, // ColorSpace
     )
     .expect("Unable to create swapchain!")
   }

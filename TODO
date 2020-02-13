@@ -3,6 +3,10 @@ the following:
 
 ## Create a new final project for vulkano that organizes things effectively and is more modular
 
+## Replace prints with logging (and make an async logger?)
+
+## Try CompositeAlpha changes on the swapchain.
+
 ## Replace throw!s with results
 
 ## Do Ash Now
