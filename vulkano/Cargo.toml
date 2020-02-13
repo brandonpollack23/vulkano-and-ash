@@ -32,6 +32,10 @@ path = "src/05_window_surface.rs"
 name = "swap_chain_vulkano"
 path = "src/06_swap_chain.rs"
 
+[[bin]]
+name = "image_views_vulkano"
+path = "src/07_image_views.rs"
+
 [dependencies]
 vulkano = "0.17.0"
 winit = "0.21.0"
