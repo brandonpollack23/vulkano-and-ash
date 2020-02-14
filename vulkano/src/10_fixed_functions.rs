@@ -8,7 +8,7 @@ use vulkano::{
     debug::{DebugCallback, MessageSeverity, MessageType},
     layers_list, ApplicationInfo, Instance, InstanceExtensions, PhysicalDevice, Version,
   },
-  pipeline::{vertex::BufferlessDefinition, GraphicsPipeline},
+  pipeline::{vertex::BufferlessDefinition, viewport::Viewport, GraphicsPipeline},
   swapchain::{
     Capabilities, ColorSpace, CompositeAlpha, FullscreenExclusive, PresentMode,
     SupportedPresentModes, Surface, Swapchain,
@@ -131,7 +131,7 @@ impl HelloTriangleApplication {
 
     // In a real implementation, we may have more than one pipeline for different
     // passes or processes, but in vulkan-tutorial only one.
-    Self::create_graphics_pipeline(&logical_device);
+    Self::create_graphics_pipeline(&logical_device, swap_chain.dimensions());
 
     Self {
       instance,
@@ -375,7 +375,7 @@ impl HelloTriangleApplication {
   /// fragment, geometry?), this at compile time in this example, but
   /// [can be done at runtime](https://github.com/vulkano-rs/vulkano/blob/master/examples/src/bin/runtime-shader/main.rs),
   /// and setting up all the fixed stages (IA, R, etc)
-  fn create_graphics_pipeline(logical_device: &Arc<Device>) {
+  fn create_graphics_pipeline(logical_device: &Arc<Device>, swap_chain_extent: [u32; 2]) {
     // I will be compiling the shaders at compile time in rust using macros
     // provided by Vulkano. As in vulkan-tutorial, this can be done at runtime
     // (see vs and fs initialization [here](https://github.com/vulkano-rs/vulkano/blob/master/examples/src/bin/runtime-shader/main.rs).
@@ -421,18 +421,67 @@ impl HelloTriangleApplication {
     // Input assembly is set to a default of triangle topology with no restart by
     // Vulkano.  Primitive restart is for _STRIP type primitives (to "restart" the
     // strip with a value of 0xFFFFFFFF, ie have multiple strips in one buffer).
-    //
-    //
+    // PipelineLayout is done when the builder is complete (calling
+    // with_pipeline_layout and passing it in separate.
     let _pipeline_builder = Arc::new(
       GraphicsPipeline::start()
+          // Begin VertexInputCreateInfo fields.
           .vertex_input(BufferlessDefinition {}) /* I'm not using any buffers for vertex input, so 
                                                     no need to specify vertex attribute descriptions--type of attributes passed in vertex 
                                                     shader, which binding to load them from and at which offset--or vertex binding 
                                                     descriptions--spacing between data and whether data is per vertex or per instance 
                                                     (vkPipelineVertexInputStateCreateInfo fields).*/
-          .vertex_shader(vert_shader_module.main_entry_point(), ()) /* Vertex shader and any defined constants. */
-          .triangle_list() // TODO remove?
-          .primitive_restart(false),
+          // Triangle_list and primitive restart may already be defined by the zeroing out
+          // of the rest of the vertex input create info, but its better to be explicit in
+          // case VK_FALSE changes somehow.
+          .triangle_list()
+          .primitive_restart(false)
+          // End VertexInput fields
+
+          // Begin PipelineViewportStateCreateInfo fields.
+          .viewports(vec![Viewport {
+            origin: [0.0, 0.0],
+            dimensions: [swap_chain_extent[0] as f32, swap_chain_extent[1] as f32],
+            depth_range: 0.0..1.0,
+          }]) /* Region of the framebuffer that will be rendered to (almost always 0,0 to
+                * width, height).  A viewport acts as a transformation, so it'll actually shrink
+                * the final image to fit in the viewport if thats what you do.  Scissors just
+                * clip it. This also sets scissors to match the viewport, so no need to also
+                * specify that. */
+          // End Viewport/Scissor fields
+
+          // Begin PipelineRasterizationStateCreateInfo fields.
+          .depth_clamp(false) /* If this is true, any fragments beyond near and far planes of the 
+                                 view frustum will be clamped to n and f instead of discarded.*/
+          .polygon_mode_fill() // Fill polygons, not only edges, not only vertices
+          //.rasterizer_discard(false) // this is off by default but just being explicit for the tutorial.
+          .line_width(1.0) // Lines connecting vertices in terms of number of frags, any more than 1 requires wideLines GPU feature.
+          .cull_mode_back() // cull back faces of primitives
+          .front_face_clockwise() // points in clockwise order are the fronts of primitives
+          // No depth biasing...something useful for shadow mapping, default is disabled.
+          // End Rasterization fields
+
+          // Begin PipelineMultisampleStateCreateInfo fields.
+          // disabled by default, lets keep it that way.
+          // End PipelineMultisampleStateCreateInfo fields.
+
+          // Begin PipelineDepthStencilStateCreateInfo fields.
+          // disabled by default, lets keep it that way.
+          // End PipelineDepthStencilStateCreateInfo fields.
+
+          // Dont want to have to set any dynamic states (Viewport, linewidth, etc) at drawing time so leave
+          // PipelineDynamicStateCreateInfo empty.
+
+          // No uniforms so no need to make a PipelineLayout
+
+          // Begin PipelineColorBlend fields. How to combine with the color already in the framebuffer.
+          .blend_pass_through() // Disable blending.
+          // End PipelineColorBlend fields.
+
+          // Begin shader fields.
+          .vertex_shader(vert_shader_module.main_entry_point(), ()) /* Second fields in shaders are
+                                                                       constants*/
+          .fragment_shader(frag_shader_module.main_entry_point(), ()),
     );
   }
 
