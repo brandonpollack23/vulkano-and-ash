@@ -56,6 +56,10 @@ path = "src/11_render_passes.rs"
 name = "graphics_pipeline_complete_vulkano"
 path = "src/12_graphics_pipeline_complete.rs"
 
+[[bin]]
+name = "framebuffers_vulkano"
+path = "src/13_framebuffers.rs"
+
 [dependencies]
 vulkano = "0.17.0"
 vulkano-shaders = "0.17.0"
