@@ -44,6 +44,7 @@ const ENABLE_VALIDATION_LAYERS: bool = true;
 #[cfg(not(debug_assertions))]
 const ENABLE_VALIDATION_LAYERS: bool = false;
 
+#[derive(Debug)]
 struct QueueFamilyIndices {
   graphics_queue_family_index: Option<usize>,
   present_queue_family_index: Option<usize>,
@@ -143,6 +144,16 @@ impl HelloTriangleApplication {
     let graphics_pipeline =
       Self::create_graphics_pipeline(&logical_device, swap_chain.dimensions(), &render_pass);
     let swap_chain_framebuffers = Self::create_framebuffers(&swap_chain_images, &render_pass);
+
+    // Command pools can be created in Vulkano, but it provides a default commadn
+    // pool called StandardCommandPool that does some really nice things by default
+    // for you.
+    // * Command buffers keep an Arc to it so it won't be dropped unless all the
+    //   using buffers are dropped, meaning you can keep a Weak<StandardCommandPool>
+    //   pointer to it.
+    // * It creates one pool per thread so that you don't have to lock to allocate.
+    // * It will reuse command buffers if possible.  It will only move them between
+    //   threads when they are done building.
 
     Self {
       instance,
@@ -257,9 +268,20 @@ impl HelloTriangleApplication {
   /// For now we'll select the first device that supports all the queue
   /// families, extensions, and surface capabilities we need.
   fn pick_physical_device(instance: &Arc<Instance>, surface: &Arc<Surface<Window>>) -> usize {
-    PhysicalDevice::enumerate(instance)
+    let physical_device = PhysicalDevice::enumerate(instance)
       .position(|physical_device| Self::is_device_suitable(surface, &physical_device))
-      .expect("Failed to find a suitable Physical Device!")
+      .expect("Failed to find a suitable Physical Device!");
+
+    let physical_devices_names = PhysicalDevice::enumerate(instance)
+      .map(|device| device.name())
+      .collect::<Vec<_>>();
+
+    println!(
+      "Physical Devices Available:\n\t{:?}\nPhysical Device Selected:\n\t{:?}\n",
+      physical_devices_names, physical_devices_names[physical_device]
+    );
+
+    physical_device
   }
 
   /// Creates the logical device from the instance and physical device index.
@@ -270,15 +292,17 @@ impl HelloTriangleApplication {
     let physical_device = PhysicalDevice::from_index(instance, physical_device_index)
       .expect("Unable to get physical device at the given index");
 
-    let queue_indices = Self::find_queue_families(surface, &physical_device);
+    let queue_family_indices = Self::find_queue_families(surface, &physical_device);
+
+    Self::log_queue_family_info(&physical_device, &queue_family_indices);
 
     // Unique queue family indices.
     let queue_family_indices: HashSet<usize> = HashSet::from_iter(
       [
-        queue_indices
+        queue_family_indices
           .graphics_queue_family_index
           .expect("No graphics queue family index"),
-        queue_indices
+        queue_family_indices
           .present_queue_family_index
           .expect("No present queue family index"),
       ]
@@ -604,6 +628,7 @@ impl HelloTriangleApplication {
   fn is_device_suitable(surface: &Arc<Surface<Window>>, physical_device: &PhysicalDevice) -> bool {
     // Supports all queue families we need.
     let queue_family_indices = Self::find_queue_families(surface, physical_device);
+
     // Supports all the extensions we need (such as VK_KHR_swapchain)
     let device_extensions_supported = Self::are_all_required_extensions_supported(physical_device);
 
@@ -624,12 +649,43 @@ impl HelloTriangleApplication {
     queue_family_indices.is_complete() && device_extensions_supported && swap_chain_adequate
   }
 
+  fn log_queue_family_info(
+    physical_device: &PhysicalDevice, queue_family_indices: &QueueFamilyIndices,
+  ) {
+    println!(
+      "Physical Device Queue Families And Sizes:\n\t{:?}\nQueue Indices Selected:\n\t{:?}\n",
+      physical_device
+        .queue_families()
+        .map(|queue| {
+          let mut families_string = String::new();
+          if queue.supports_graphics() {
+            families_string = families_string + "Graphics|";
+          }
+          if queue.supports_compute() {
+            families_string = families_string + "Compute|";
+          }
+          if queue.explicitly_supports_transfers() {
+            families_string = families_string + "Transfer|";
+          }
+          if queue.supports_sparse_binding() {
+            families_string = families_string + "Sparse Binding|";
+          }
+          if families_string.len() > 0 {
+            families_string.truncate(families_string.len() - 1);
+          }
+          (families_string, queue.queues_count())
+        })
+        .enumerate()
+        .collect::<Vec<_>>(),
+      queue_family_indices
+    );
+  }
+
   /// Returns the [QueueFamilyIndices](struct.QueueFamilyIndices.html) supported
   /// by this physical device.
   /// Right now graphics/present queues are treated seperately, but we could try
   /// to optimize by looking for a queue family that supports both instead of
   /// the first of each.
-  /// TODO QueueFamilyIndices member
   fn find_queue_families(
     surface: &Arc<Surface<Window>>, physical_device: &PhysicalDevice,
   ) -> QueueFamilyIndices {
