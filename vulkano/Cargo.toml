@@ -48,6 +48,10 @@ path = "src/09_shader_modules.rs"
 name = "fixed_functions_vulkano"
 path = "src/10_fixed_functions.rs"
 
+[[bin]]
+name = "render_passes_vulkano"
+path = "src/11_render_passes.rs"
+
 [dependencies]
 vulkano = "0.17.0"
 vulkano-shaders = "0.17.0"
