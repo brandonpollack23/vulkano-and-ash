@@ -3,13 +3,15 @@ use vulkano::{
   self,
   device::{Device, DeviceExtensions, Features, Queue},
   format::Format,
-  framebuffer::RenderPassAbstract,
+  framebuffer::{RenderPassAbstract, Subpass},
   image::{ImageUsage, SwapchainImage},
   instance::{
     debug::{DebugCallback, MessageSeverity, MessageType},
     layers_list, ApplicationInfo, Instance, InstanceExtensions, PhysicalDevice, Version,
   },
-  pipeline::{vertex::BufferlessDefinition, viewport::Viewport, GraphicsPipeline},
+  pipeline::{
+    vertex::BufferlessDefinition, viewport::Viewport, GraphicsPipeline, GraphicsPipelineAbstract,
+  },
   single_pass_renderpass,
   swapchain::{
     Capabilities, ColorSpace, CompositeAlpha, FullscreenExclusive, PresentMode,
@@ -110,6 +112,7 @@ pub struct HelloTriangleApplication {
   swap_chain_images: Vec<Arc<SwapchainImage<Window>>>,
 
   render_pass: Arc<dyn RenderPassAbstract + Send + Sync>,
+  graphics_pipeline: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
 }
 impl HelloTriangleApplication {
   fn initialize() -> Self {
@@ -137,7 +140,8 @@ impl HelloTriangleApplication {
 
     // In a real implementation, we may have more than one pipeline for different
     // passes or processes, but in vulkan-tutorial only one.
-    Self::create_graphics_pipeline(&logical_device, swap_chain.dimensions());
+    let graphics_pipeline =
+      Self::create_graphics_pipeline(&logical_device, swap_chain.dimensions(), &render_pass);
 
     Self {
       instance,
@@ -150,6 +154,7 @@ impl HelloTriangleApplication {
       swap_chain,
       swap_chain_images,
       render_pass,
+      graphics_pipeline,
     }
   }
 
@@ -382,7 +387,10 @@ impl HelloTriangleApplication {
   /// fragment, geometry?), this at compile time in this example, but
   /// [can be done at runtime](https://github.com/vulkano-rs/vulkano/blob/master/examples/src/bin/runtime-shader/main.rs),
   /// and setting up all the fixed stages (IA, R, etc)
-  fn create_graphics_pipeline(logical_device: &Arc<Device>, swap_chain_extent: [u32; 2]) {
+  fn create_graphics_pipeline(
+    logical_device: &Arc<Device>, swap_chain_extent: [u32; 2],
+    render_pass: &Arc<dyn RenderPassAbstract + Send + Sync>,
+  ) -> Arc<dyn GraphicsPipelineAbstract + Send + Sync> {
     // I will be compiling the shaders at compile time in rust using macros
     // provided by Vulkano. As in vulkan-tutorial, this can be done at runtime
     // (see vs and fs initialization [here](https://github.com/vulkano-rs/vulkano/blob/master/examples/src/bin/runtime-shader/main.rs).
@@ -430,7 +438,7 @@ impl HelloTriangleApplication {
     // strip with a value of 0xFFFFFFFF, ie have multiple strips in one buffer).
     // PipelineLayout is done when the builder is complete (calling
     // with_pipeline_layout and passing it in separate.
-    let _pipeline_builder = Arc::new(
+    Arc::new(
       GraphicsPipeline::start()
           // Begin VertexInputCreateInfo fields.
           .vertex_input(BufferlessDefinition {}) /* I'm not using any buffers for vertex input, so 
@@ -450,8 +458,8 @@ impl HelloTriangleApplication {
             origin: [0.0, 0.0],
             dimensions: [swap_chain_extent[0] as f32, swap_chain_extent[1] as f32],
             depth_range: 0.0..1.0,
-          }]) /* Region of the framebuffer that will be rendered to (almost always 0,0 to
-                * width, height).  A viewport acts as a transformation, so it'll actually shrink
+          }]) /* Region of the framebuffer that will be rendered to--almost always 0,0 to
+                * width, height.  A viewport acts as a transformation, so it'll actually shrink
                 * the final image to fit in the viewport if thats what you do.  Scissors just
                 * clip it. This also sets scissors to match the viewport, so no need to also
                 * specify that. */
@@ -488,8 +496,12 @@ impl HelloTriangleApplication {
           // Begin shader fields.
           .vertex_shader(vert_shader_module.main_entry_point(), ()) /* Second fields in shaders are
                                                                        constants*/
-          .fragment_shader(frag_shader_module.main_entry_point(), ()),
-    );
+          .fragment_shader(frag_shader_module.main_entry_point(), ())
+          // Now just add the render_pass and build.
+          .render_pass(Subpass::from(render_pass.clone(), 0).expect("Could not create subpass from render pass"))
+          .build(logical_device.clone())
+          .expect("Could not build graphics pipeline"),
+    )
   }
 
   fn create_render_pass(
