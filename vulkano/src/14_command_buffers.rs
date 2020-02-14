@@ -1,6 +1,8 @@
 use std::{collections::HashSet, iter::FromIterator, sync::Arc};
 use vulkano::{
   self,
+  command_buffer::{AutoCommandBuffer, AutoCommandBufferBuilder, DynamicState},
+  descriptor::PipelineLayoutAbstract,
   device::{Device, DeviceExtensions, Features, Queue},
   format::Format,
   framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract, Subpass},
@@ -10,7 +12,9 @@ use vulkano::{
     layers_list, ApplicationInfo, Instance, InstanceExtensions, PhysicalDevice, Version,
   },
   pipeline::{
-    vertex::BufferlessDefinition, viewport::Viewport, GraphicsPipeline, GraphicsPipelineAbstract,
+    vertex::{BufferlessDefinition, BufferlessVertices},
+    viewport::Viewport,
+    GraphicsPipeline,
   },
   single_pass_renderpass,
   swapchain::{
@@ -91,6 +95,16 @@ impl HelloTriangleWindow {
   }
 }
 
+// Vulkano nonsense for types and bufferless acces, see note below, not that bad
+// though it makes sense.  Each template param is a compile time check that the
+// vertex type, Layout type, and Renderpass type all match up and are
+// compatible.
+type ConcreteGraphicsPipeline = GraphicsPipeline<
+  BufferlessDefinition,
+  Box<dyn PipelineLayoutAbstract + Send + Sync + 'static>,
+  Arc<dyn RenderPassAbstract + Send + Sync + 'static>,
+>;
+
 /// Struct representing the application to display the triangle.
 #[allow(dead_code)]
 pub struct HelloTriangleApplication {
@@ -113,9 +127,15 @@ pub struct HelloTriangleApplication {
   swap_chain_images: Vec<Arc<SwapchainImage<Window>>>,
 
   render_pass: Arc<dyn RenderPassAbstract + Send + Sync>,
-  graphics_pipeline: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
+  // NOTE: We need to the full type of
+  // self.graphics_pipeline, because `BufferlessVertices` only
+  // works when the concrete type of the graphics pipeline is visible
+  // to the command buffer.
+  graphics_pipeline: Arc<ConcreteGraphicsPipeline>,
 
   swap_chain_framebuffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
+
+  command_buffers: Vec<Arc<AutoCommandBuffer>>,
 }
 impl HelloTriangleApplication {
   fn initialize() -> Self {
@@ -155,7 +175,7 @@ impl HelloTriangleApplication {
     // * It will reuse command buffers if possible.  It will only move them between
     //   threads when they are done building.
 
-    Self {
+    let mut app = Self {
       instance,
       debug_callback,
       window_surface,
@@ -168,7 +188,12 @@ impl HelloTriangleApplication {
       render_pass,
       graphics_pipeline,
       swap_chain_framebuffers,
-    }
+
+      command_buffers: vec![],
+    };
+
+    app.create_command_buffers();
+    app
   }
 
   /// Initializes vulkan instance.
@@ -447,7 +472,7 @@ impl HelloTriangleApplication {
   fn create_graphics_pipeline(
     logical_device: &Arc<Device>, swap_chain_extent: [u32; 2],
     render_pass: &Arc<dyn RenderPassAbstract + Send + Sync>,
-  ) -> Arc<dyn GraphicsPipelineAbstract + Send + Sync> {
+  ) -> Arc<ConcreteGraphicsPipeline> {
     // I will be compiling the shaders at compile time in rust using macros
     // provided by Vulkano. As in vulkan-tutorial, this can be done at runtime
     // (see vs and fs initialization [here](https://github.com/vulkano-rs/vulkano/blob/master/examples/src/bin/runtime-shader/main.rs).
@@ -766,6 +791,53 @@ impl HelloTriangleApplication {
       capabilities.min_image_extent[0].max(capabilities.max_image_extent[0].min(WIDTH)),
       capabilities.min_image_extent[1].max(capabilities.max_image_extent[1].min(HEIGHT)),
     ]
+  }
+
+  /// Creates the command buffers that draw the triangle to the screen.  The
+  /// tutorial repository has this as a member for some reason instead of
+  /// initializing it like all the other components of the system.  I would
+  /// guess that's because this is something you do while your system is running
+  /// normally, but I can't be totally sure until I get further.
+  ///
+  /// It also opens it up to making these command buffers change later post
+  /// init.
+  fn create_command_buffers(&mut self) {
+    let queue_family = self.graphics_queue.family();
+    self.command_buffers = self
+      .swap_chain_framebuffers
+      .iter()
+      .map(|framebuffer| {
+        let vertices = BufferlessVertices {
+          vertices: 3,
+          instances: 1,
+        };
+        Arc::new(
+          AutoCommandBufferBuilder::primary_simultaneous_use(
+            self.logical_device.clone(),
+            queue_family,
+          )
+          .unwrap()
+          .begin_render_pass(
+            framebuffer.clone(),
+            false,
+            vec![[0.0, 0.0, 0.0, 1.0].into()],
+          )
+          .unwrap()
+          .draw(
+            self.graphics_pipeline.clone(),
+            &DynamicState::none(),
+            vertices,
+            (),
+            (),
+          )
+          .unwrap()
+          .end_render_pass()
+          .unwrap()
+          .build()
+          .unwrap(),
+        )
+      })
+      .collect();
   }
 
   /// Takes full control of the executing thread and runs the event loop for it.
