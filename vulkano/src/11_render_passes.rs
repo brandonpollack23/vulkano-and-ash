@@ -3,12 +3,14 @@ use vulkano::{
   self,
   device::{Device, DeviceExtensions, Features, Queue},
   format::Format,
+  framebuffer::RenderPassAbstract,
   image::{ImageUsage, SwapchainImage},
   instance::{
     debug::{DebugCallback, MessageSeverity, MessageType},
     layers_list, ApplicationInfo, Instance, InstanceExtensions, PhysicalDevice, Version,
   },
   pipeline::{vertex::BufferlessDefinition, viewport::Viewport, GraphicsPipeline},
+  single_pass_renderpass,
   swapchain::{
     Capabilities, ColorSpace, CompositeAlpha, FullscreenExclusive, PresentMode,
     SupportedPresentModes, Surface, Swapchain,
@@ -106,6 +108,8 @@ pub struct HelloTriangleApplication {
   // no swizzling, matches the format, VK_IMAGE_ASPECT_COLOR_BIT (color target) no mipmapping and 1
   // layer.
   swap_chain_images: Vec<Arc<SwapchainImage<Window>>>,
+
+  render_pass: Arc<dyn RenderPassAbstract + Send + Sync>,
 }
 impl HelloTriangleApplication {
   fn initialize() -> Self {
@@ -129,6 +133,8 @@ impl HelloTriangleApplication {
       &presentation_queue,
     );
 
+    let render_pass = Self::create_render_pass(&logical_device, swap_chain.format());
+
     // In a real implementation, we may have more than one pipeline for different
     // passes or processes, but in vulkan-tutorial only one.
     Self::create_graphics_pipeline(&logical_device, swap_chain.dimensions());
@@ -143,6 +149,7 @@ impl HelloTriangleApplication {
       presentation_queue,
       swap_chain,
       swap_chain_images,
+      render_pass,
     }
   }
 
@@ -483,6 +490,37 @@ impl HelloTriangleApplication {
                                                                        constants*/
           .fragment_shader(frag_shader_module.main_entry_point(), ()),
     );
+  }
+
+  fn create_render_pass(
+    logical_device: &Arc<Device>, color_format: Format,
+  ) -> Arc<dyn RenderPassAbstract + Send + Sync> {
+    // This macro does all the work of building up the render pass, there is a
+    // multiplass equivalent as well.
+    // Vulkano does all this because there is a type template param for RenderPass
+    // that is hard to make yourself that is used for compile time safety checks.
+    // see [the deferred rendering example](https://github.com/vulkano-rs/vulkano/blob/master/examples/src/bin/deferred/frame/system.rs)
+    // for a more in depth description.
+    Arc::new(
+      single_pass_renderpass!(logical_device.clone(),
+        attachments: {
+          color: { // The 0th attachment (directly referenced by layout = 0 output in the frag shader).
+            load: Clear, // Clear the screen before rendering.
+            store: Store, // Store the rendered contents to memory
+            format: color_format, // Color format of the attachment
+            samples: 1, // No multisampling
+            // Stencil store and load are dont care since we aren't using a stencil
+            // Initial layout undefined
+            // Final layout is set by the single pass macro as VK_IMAGE_LAYOUT_RESENT_SRC_KHR
+          }
+        },
+        pass: { // Only one subpass, the color attachment output defined above.
+          color: [color],
+          depth_stencil: {}
+        }
+      )
+      .expect("Error building render pass"),
+    )
   }
 
   fn check_and_print_validation_layer_support() -> bool {
