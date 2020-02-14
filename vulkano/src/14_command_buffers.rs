@@ -409,6 +409,37 @@ impl HelloTriangleApplication {
     .expect("Unable to create swapchain!")
   }
 
+  fn create_render_pass(
+    logical_device: &Arc<Device>, color_format: Format,
+  ) -> Arc<dyn RenderPassAbstract + Send + Sync> {
+    // This macro does all the work of building up the render pass, there is a
+    // multiplass equivalent as well.
+    // Vulkano does all this because there is a type template param for RenderPass
+    // that is hard to make yourself that is used for compile time safety checks.
+    // see [the deferred rendering example](https://github.com/vulkano-rs/vulkano/blob/master/examples/src/bin/deferred/frame/system.rs)
+    // for a more in depth description.
+    Arc::new(
+      single_pass_renderpass!(logical_device.clone(),
+        attachments: {
+          color: { // The 0th attachment (directly referenced by layout = 0 output in the frag shader).
+            load: Clear, // Clear the screen before rendering.
+            store: Store, // Store the rendered contents to memory
+            format: color_format, // Color format of the attachment
+            samples: 1, // No multisampling
+            // Stencil store and load are dont care since we aren't using a stencil
+            // Initial layout undefined
+            // Final layout is set by the single pass macro as VK_IMAGE_LAYOUT_RESENT_SRC_KHR
+          }
+        },
+        pass: { // Only one subpass, the color attachment output defined above.
+          color: [color],
+          depth_stencil: {}
+        }
+      )
+      .expect("Error building render pass"),
+    )
+  }
+
   /// Create the graphics pipeline by compiling all the shaders (vertex,
   /// fragment, geometry?), this at compile time in this example, but
   /// [can be done at runtime](https://github.com/vulkano-rs/vulkano/blob/master/examples/src/bin/runtime-shader/main.rs),
@@ -545,45 +576,14 @@ impl HelloTriangleApplication {
       .map(|image| {
         let fba: Arc<dyn FramebufferAbstract + Send + Sync> = Arc::new(
           Framebuffer::start(render_pass.clone())
-            .add(image.clone()) // Only one buffer, the output color buffer.  In deferred rendering this might be diffuse, normals, depth buffers, etc as well as final image.
-            .unwrap()
-            .build()
-            .expect("Unable to create framebuffer!"),
+                .add(image.clone()) // Only one buffer, the output color buffer.  In deferred rendering this might be diffuse, normals, depth buffers, etc as well as final image.
+                .unwrap()
+                .build()
+                .expect("Unable to create framebuffer!"),
         );
         fba
       })
       .collect()
-  }
-
-  fn create_render_pass(
-    logical_device: &Arc<Device>, color_format: Format,
-  ) -> Arc<dyn RenderPassAbstract + Send + Sync> {
-    // This macro does all the work of building up the render pass, there is a
-    // multiplass equivalent as well.
-    // Vulkano does all this because there is a type template param for RenderPass
-    // that is hard to make yourself that is used for compile time safety checks.
-    // see [the deferred rendering example](https://github.com/vulkano-rs/vulkano/blob/master/examples/src/bin/deferred/frame/system.rs)
-    // for a more in depth description.
-    Arc::new(
-      single_pass_renderpass!(logical_device.clone(),
-        attachments: {
-          color: { // The 0th attachment (directly referenced by layout = 0 output in the frag shader).
-            load: Clear, // Clear the screen before rendering.
-            store: Store, // Store the rendered contents to memory
-            format: color_format, // Color format of the attachment
-            samples: 1, // No multisampling
-            // Stencil store and load are dont care since we aren't using a stencil
-            // Initial layout undefined
-            // Final layout is set by the single pass macro as VK_IMAGE_LAYOUT_RESENT_SRC_KHR
-          }
-        },
-        pass: { // Only one subpass, the color attachment output defined above.
-          color: [color],
-          depth_stencil: {}
-        }
-      )
-      .expect("Error building render pass"),
-    )
   }
 
   fn check_and_print_validation_layer_support() -> bool {
