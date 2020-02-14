@@ -294,7 +294,7 @@ impl HelloTriangleApplication {
 
     let queue_family_indices = Self::find_queue_families(surface, &physical_device);
 
-    Self::log_queue_family_info(&physical_device, &queue_family_indices);
+    Self::log_queue_family_info(&physical_device, surface, &queue_family_indices);
 
     // Unique queue family indices.
     let queue_family_indices: HashSet<usize> = HashSet::from_iter(
@@ -650,7 +650,8 @@ impl HelloTriangleApplication {
   }
 
   fn log_queue_family_info(
-    physical_device: &PhysicalDevice, queue_family_indices: &QueueFamilyIndices,
+    physical_device: &PhysicalDevice, surface: &Arc<Surface<Window>>,
+    queue_family_indices: &QueueFamilyIndices,
   ) {
     println!(
       "Physical Device Queue Families And Sizes:\n\t{:?}\nQueue Indices Selected:\n\t{:?}\n",
@@ -660,6 +661,9 @@ impl HelloTriangleApplication {
           let mut families_string = String::new();
           if queue.supports_graphics() {
             families_string = families_string + "Graphics|";
+          }
+          if surface.is_supported(queue).unwrap() {
+            families_string = families_string + "Surface_Present|";
           }
           if queue.supports_compute() {
             families_string = families_string + "Compute|";
