@@ -3,7 +3,7 @@ use vulkano::{
   self,
   device::{Device, DeviceExtensions, Features, Queue},
   format::Format,
-  framebuffer::{RenderPassAbstract, Subpass},
+  framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract, Subpass},
   image::{ImageUsage, SwapchainImage},
   instance::{
     debug::{DebugCallback, MessageSeverity, MessageType},
@@ -113,6 +113,8 @@ pub struct HelloTriangleApplication {
 
   render_pass: Arc<dyn RenderPassAbstract + Send + Sync>,
   graphics_pipeline: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
+
+  swap_chain_framebuffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
 }
 impl HelloTriangleApplication {
   fn initialize() -> Self {
@@ -135,13 +137,12 @@ impl HelloTriangleApplication {
       &graphics_queue,
       &presentation_queue,
     );
-
     let render_pass = Self::create_render_pass(&logical_device, swap_chain.format());
-
     // In a real implementation, we may have more than one pipeline for different
     // passes or processes, but in vulkan-tutorial only one.
     let graphics_pipeline =
       Self::create_graphics_pipeline(&logical_device, swap_chain.dimensions(), &render_pass);
+    let swap_chain_framebuffers = Self::create_framebuffers(&swap_chain_images, &render_pass);
 
     Self {
       instance,
@@ -155,6 +156,7 @@ impl HelloTriangleApplication {
       swap_chain_images,
       render_pass,
       graphics_pipeline,
+      swap_chain_framebuffers,
     }
   }
 
@@ -502,6 +504,31 @@ impl HelloTriangleApplication {
           .build(logical_device.clone())
           .expect("Could not build graphics pipeline"),
     )
+  }
+
+  /// Create a frame buffer for each of the swap chain images.
+  /// A framebuffer associates all the images needed for ONE draw (so if there
+  /// are multiple output images, these are shared by a framebuffer, like with
+  /// deferred rendering), but there will be one framebuffer for
+  /// each...framebuffer (ie 2 for double buffering, 3 for triple etc).
+  /// This is why we make one for each swap_chain_image!
+  fn create_framebuffers(
+    swap_chain_images: &[Arc<SwapchainImage<Window>>],
+    render_pass: &Arc<dyn RenderPassAbstract + Send + Sync>,
+  ) -> Vec<Arc<dyn FramebufferAbstract + Send + Sync>> {
+    swap_chain_images
+      .iter()
+      .map(|image| {
+        let fba: Arc<dyn FramebufferAbstract + Send + Sync> = Arc::new(
+          Framebuffer::start(render_pass.clone())
+            .add(image.clone()) // Only one buffer, the output color buffer.  In deferred rendering this might be diffuse, normals, depth buffers, etc as well as final image.
+            .unwrap()
+            .build()
+            .expect("Unable to create framebuffer!"),
+        );
+        fba
+      })
+      .collect()
   }
 
   fn create_render_pass(
