@@ -18,10 +18,10 @@ use vulkano::{
   },
   single_pass_renderpass,
   swapchain::{
-    Capabilities, ColorSpace, CompositeAlpha, FullscreenExclusive, PresentMode,
+    acquire_next_image, Capabilities, ColorSpace, CompositeAlpha, FullscreenExclusive, PresentMode,
     SupportedPresentModes, Surface, Swapchain,
   },
-  sync::SharingMode,
+  sync::{GpuFuture, SharingMode},
 };
 use vulkano_win::VkSurfaceBuild;
 use winit::{
@@ -105,12 +105,10 @@ type ConcreteGraphicsPipeline = GraphicsPipeline<
   Arc<dyn RenderPassAbstract + Send + Sync + 'static>,
 >;
 
-/// Struct representing the application to display the triangle.
 #[allow(dead_code)]
-pub struct HelloTriangleApplication {
+pub struct HelloTriangleRenderer {
   instance: Arc<Instance>,
   debug_callback: Option<DebugCallback>,
-  window_surface: HelloTriangleWindow,
   physical_device_index: usize,
   logical_device: Arc<Device>,
 
@@ -137,11 +135,9 @@ pub struct HelloTriangleApplication {
 
   command_buffers: Vec<Arc<AutoCommandBuffer>>,
 }
-impl HelloTriangleApplication {
-  fn initialize() -> Self {
-    let instance = Self::create_vulkan_instance();
+impl HelloTriangleRenderer {
+  fn initialize(instance: &Arc<Instance>, window_surface: &HelloTriangleWindow) -> Self {
     let debug_callback = Self::setup_debug_callback_if_enabled(&instance);
-    let window_surface = HelloTriangleWindow::create_vksurface_and_window(&instance);
     let physical_device_index =
       Self::pick_physical_device(&instance, &window_surface.winit_window_surface);
     let (logical_device, graphics_queue, presentation_queue) =
@@ -165,20 +161,9 @@ impl HelloTriangleApplication {
       Self::create_graphics_pipeline(&logical_device, swap_chain.dimensions(), &render_pass);
     let swap_chain_framebuffers = Self::create_framebuffers(&swap_chain_images, &render_pass);
 
-    // Command pools can be created in Vulkano, but it provides a default commadn
-    // pool called StandardCommandPool that does some really nice things by default
-    // for you.
-    // * Command buffers keep an Arc to it so it won't be dropped unless all the
-    //   using buffers are dropped, meaning you can keep a Weak<StandardCommandPool>
-    //   pointer to it.
-    // * It creates one pool per thread so that you don't have to lock to allocate.
-    // * It will reuse command buffers if possible.  It will only move them between
-    //   threads when they are done building.
-
-    let mut app = Self {
-      instance,
+    HelloTriangleRenderer {
+      instance: instance.clone(),
       debug_callback,
-      window_surface,
       physical_device_index,
       logical_device,
       graphics_queue,
@@ -190,46 +175,7 @@ impl HelloTriangleApplication {
       swap_chain_framebuffers,
 
       command_buffers: vec![],
-    };
-
-    app.create_command_buffers();
-    app
-  }
-
-  /// Initializes vulkan instance.
-  fn create_vulkan_instance() -> Arc<Instance> {
-    if ENABLE_VALIDATION_LAYERS && !Self::check_and_print_validation_layer_support() {
-      panic!("Validation layers requested, but not available!");
     }
-
-    Self::print_supported_instance_extensions();
-    let extensions = if ENABLE_VALIDATION_LAYERS {
-      Self::get_required_instance_extensions()
-    } else {
-      vulkano_win::required_extensions()
-    };
-    println!("Required Instance Extensions:\n\t{:?}\n", extensions);
-
-    let app_info = ApplicationInfo {
-      application_name: Some("Hello Triangle".into()),
-      application_version: Some(Version {
-        major: 0,
-        minor: 1,
-        patch: 0,
-      }),
-      engine_name: Some("No Engine".into()),
-      engine_version: None,
-    };
-
-    // In vulkano we use "new" static factory methods to construct vkInstance and
-    // other vulkan objects instead of passing all the params in a create_info
-    // struct.
-    Instance::new(
-      Some(&app_info),
-      &extensions,
-      VALIDATION_LAYERS.iter().cloned(),
-    )
-    .expect("Failed to create Vulkan instance")
   }
 
   fn setup_debug_callback_if_enabled(instance: &Arc<Instance>) -> Option<DebugCallback> {
@@ -425,7 +371,7 @@ impl HelloTriangleApplication {
       CompositeAlpha::Opaque, // Dont blend with other windows in the window system.
       present_mode,           /* What type of present mode we're doing (immediate, fifo, fifo
                                * messagebox etc). */
-      FullscreenExclusive::Default, // TODO what does this do?
+      FullscreenExclusive::Default, // Controls the VkSurfaceFullScreenExclusiveInfoEXT value.
       true,                         /* clipped, no need to draw pixels that are obscured (by
                                      * another window or off the
                                      * screen) */
@@ -611,44 +557,6 @@ impl HelloTriangleApplication {
       .collect()
   }
 
-  fn check_and_print_validation_layer_support() -> bool {
-    let layers: Vec<_> = layers_list()
-      .expect("Could not get available layers")
-      .map(|l| l.name().to_owned())
-      .collect();
-
-    println!(
-      "Supported Validation Layers: \n\t{:?}\nRequested Validation Layers \n\t{:?}\n",
-      layers, VALIDATION_LAYERS
-    );
-
-    // Ensure all the Validation layers we require
-    VALIDATION_LAYERS
-      .iter()
-      .all(|layer_name| layers.contains(&layer_name.to_string()))
-  }
-
-  fn get_required_instance_extensions() -> InstanceExtensions {
-    let mut extensions = vulkano_win::required_extensions();
-
-    if ENABLE_VALIDATION_LAYERS {
-      // No need to check for the existence of this extension because the validation
-      // layers being present already confirms it.
-      extensions.ext_debug_utils = true;
-    }
-
-    extensions
-  }
-
-  fn print_supported_instance_extensions() {
-    let supported_extensions =
-      InstanceExtensions::supported_by_core().expect("failed to retrieve supported extensions");
-    println!(
-      "Supported Instance Extensions:\n\t{:?}",
-      supported_extensions
-    );
-  }
-
   /// Checks if the device has all the features and queue families needed.
   fn is_device_suitable(surface: &Arc<Surface<Window>>, physical_device: &PhysicalDevice) -> bool {
     // Supports all queue families we need.
@@ -801,6 +709,11 @@ impl HelloTriangleApplication {
   ///
   /// It also opens it up to making these command buffers change later post
   /// init.
+  ///
+  /// We create one command buffer per framebuffer, since they become attached
+  /// to the framebuffer itself.  Recall the framebuffer is the collection of
+  /// all images used for rendering one frame (just color for us, but could be
+  /// normals depth stencil etc for other deferred or PBR strategies).
   fn create_command_buffers(&mut self) {
     let queue_family = self.graphics_queue.family();
     self.command_buffers = self
@@ -840,13 +753,181 @@ impl HelloTriangleApplication {
       .collect();
   }
 
+  /// What we've all been waiting to see.  Now that setup is done this is pretty
+  /// simple (like OGL).
+  ///
+  /// 1) Find out which image from the swapchain that we want to render to.
+  /// Recall that there were a number of images in the swapchain, Vulkan will
+  /// tell us which one is to be swapped in next by it's index (which is the
+  /// same index as the framebuffer it is associated with).
+  ///
+  /// 2) Execute the command buffer with that image as the attachment. Recall
+  /// that when we recorded to the command buffers we specified a framebuffer
+  /// for them to execute on.  We can us the index from step 1 to select the
+  /// correct framebuffer to submit.
+  ///
+  /// 3) Return the image to the swap chain for presentation.
+  ///
+  /// Normally we'd set up that buffer and send it to the driver for execution
+  /// and we'd also use semaphores to be synchronize the image being available
+  /// (AcquireNextImageKHR) and the draw being complete.
+  ///
+  /// Vulkano creates a fence and semaphore for qcquire_next_image (the fence is
+  /// how the future is implemented)  if you want to avoid the fence you can do
+  /// acquire_next_image_raw and use the UnsafeCommandBuffer and raw family of
+  /// functions instead of GpuFuture family, which all rely on fence for their
+  /// signaling.  More details [in Vulkan's Design Docs](https://github.com/vulkano-rs/vulkano/blob/master/DESIGN.md#command-buffers)
+  fn draw_frame(&mut self) {
+    // the _ is a bool letting us know if the swapchain is suboptimally configured
+    // for the surface targets, meaning the swapchain needs to be recreated (did
+    // window extent change etc?).
+    let (image_index, _, acquire_future) =
+      acquire_next_image(self.swap_chain.clone(), None).unwrap();
+
+    // Use the command buffer associated with the swap_chain vkImage that the
+    // framebuffer is using as the color attachment (and therefore output).
+    let command_buffer = self.command_buffers[image_index].clone();
+
+    let all_actions_future = acquire_future
+      .then_execute(self.graphics_queue.clone(), command_buffer)
+      .unwrap()
+      .then_swapchain_present(
+        self.presentation_queue.clone(),
+        self.swap_chain.clone(),
+        image_index,
+      )
+      .then_signal_fence_and_flush()
+      .unwrap();
+
+    // Wait forever until all the submit actions are complete.
+    all_actions_future.wait(None).unwrap();
+  }
+}
+
+/// Struct representing the application to display the triangle.
+#[allow(dead_code)]
+pub struct HelloTriangleApplication {
+  instance: Arc<Instance>,
+  window_surface: HelloTriangleWindow,
+  renderer: HelloTriangleRenderer,
+}
+impl HelloTriangleApplication {
+  fn initialize() -> Self {
+    // This way we can see that we're tightly coupled to Vulkano's method of
+    // rendering, even though this should help seperate it out. If I were to
+    // have different rendering backends for this application, Instead of Relying on
+    // having an instance member directly, I'd have a member called renderer which
+    // just has to implement a trait. Then I could have what is essentially this
+    // struct and HelloTriangleRenderer sans main loop implement that and rely only
+    // on that renderer being constructed by the application driver and passed in or
+    // rely on cfg flags to figure it out correctly.
+    //
+    // All that said...there's no need to do it.
+    let instance = Self::create_vulkan_instance();
+    let window_surface = HelloTriangleWindow::create_vksurface_and_window(&instance);
+    let renderer = HelloTriangleRenderer::initialize(&instance, &window_surface);
+
+    // Command pools can be created in Vulkano, but it provides a default commadn
+    // pool called StandardCommandPool that does some really nice things by default
+    // for you.
+    // * Command buffers keep an Arc to it so it won't be dropped unless all the
+    //   using buffers are dropped, meaning you can keep a Weak<StandardCommandPool>
+    //   pointer to it.
+    // * It creates one pool per thread so that you don't have to lock to allocate.
+    // * It will reuse command buffers if possible.  It will only move them between
+    //   threads when they are done building.
+
+    let mut app = Self {
+      instance,
+      window_surface,
+      renderer,
+    };
+
+    app.renderer.create_command_buffers();
+    app
+  }
+
+  /// Initializes vulkan instance.
+  fn create_vulkan_instance() -> Arc<Instance> {
+    if ENABLE_VALIDATION_LAYERS && !Self::check_and_print_validation_layer_support() {
+      panic!("Validation layers requested, but not available!");
+    }
+
+    Self::print_supported_instance_extensions();
+    let extensions = if ENABLE_VALIDATION_LAYERS {
+      Self::get_required_instance_extensions()
+    } else {
+      vulkano_win::required_extensions()
+    };
+    println!("Required Instance Extensions:\n\t{:?}\n", extensions);
+
+    let app_info = ApplicationInfo {
+      application_name: Some("Hello Triangle".into()),
+      application_version: Some(Version {
+        major: 0,
+        minor: 1,
+        patch: 0,
+      }),
+      engine_name: Some("No Engine".into()),
+      engine_version: None,
+    };
+
+    // In vulkano we use "new" static factory methods to construct vkInstance and
+    // other vulkan objects instead of passing all the params in a create_info
+    // struct.
+    Instance::new(
+      Some(&app_info),
+      &extensions,
+      VALIDATION_LAYERS.iter().cloned(),
+    )
+    .expect("Failed to create Vulkan instance")
+  }
+
+  fn check_and_print_validation_layer_support() -> bool {
+    let layers: Vec<_> = layers_list()
+      .expect("Could not get available layers")
+      .map(|l| l.name().to_owned())
+      .collect();
+
+    println!(
+      "Supported Validation Layers: \n\t{:?}\nRequested Validation Layers \n\t{:?}\n",
+      layers, VALIDATION_LAYERS
+    );
+
+    // Ensure all the Validation layers we require
+    VALIDATION_LAYERS
+      .iter()
+      .all(|layer_name| layers.contains(&layer_name.to_string()))
+  }
+
+  fn get_required_instance_extensions() -> InstanceExtensions {
+    let mut extensions = vulkano_win::required_extensions();
+
+    if ENABLE_VALIDATION_LAYERS {
+      // No need to check for the existence of this extension because the validation
+      // layers being present already confirms it.
+      extensions.ext_debug_utils = true;
+    }
+
+    extensions
+  }
+
+  fn print_supported_instance_extensions() {
+    let supported_extensions =
+      InstanceExtensions::supported_by_core().expect("failed to retrieve supported extensions");
+    println!(
+      "Supported Instance Extensions:\n\t{:?}",
+      supported_extensions
+    );
+  }
+
   /// Takes full control of the executing thread and runs the event loop for it.
-  fn main_loop(self) {
+  fn main_loop(mut self) {
     let winit_window_surface = self.window_surface.winit_window_surface.clone();
-    let window_surface = self.window_surface;
+    let mut renderer = self.renderer;
     // TODO move everything else into its own struct to move out here and be able to
     // call "draw on" Maybe HelloTriangleRenderer
-    window_surface.run(move |event, _, control_flow| {
+    self.window_surface.run(move |event, _, control_flow| {
       let window = winit_window_surface.window();
 
       // By default continuously run this event loop, even if the OS hasn't
@@ -862,7 +943,7 @@ impl HelloTriangleApplication {
         }
         Event::RedrawRequested(_) => {
           // Redraw requested, this is called after MainEventsCleared.
-          // TODO draw frame
+          renderer.draw_frame();
         }
         Event::WindowEvent { window_id, event } => {
           Self::main_loop_window_event(&event, &window_id, control_flow)
@@ -879,6 +960,7 @@ impl HelloTriangleApplication {
       WindowEvent::CloseRequested => {
         // When the window system requests a close, signal to winit that we'd like to
         // close the window.
+        println!("Exiting due to close request event from window system...");
         *control_flow = ControlFlow::Exit
       }
       WindowEvent::KeyboardInput { input, .. } => {
@@ -887,7 +969,7 @@ impl HelloTriangleApplication {
         if let (Some(VirtualKeyCode::Escape), ElementState::Pressed) =
           (input.virtual_keycode, input.state)
         {
-          dbg!();
+          println!("Exiting due to escape press...");
           *control_flow = ControlFlow::Exit
         }
       }
