@@ -65,7 +65,7 @@ name = "command_buffers_vulkano"
 path = "src/14_command_buffers.rs"
 
 [[bin]]
-name = "command_buffers_vulkano"
+name = "rendering_and_presentation_vulkano"
 path = "src/15_rendering_and_presentation.rs"
 
 [dependencies]
