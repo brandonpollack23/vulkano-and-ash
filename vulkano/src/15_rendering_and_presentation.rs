@@ -26,9 +26,9 @@ use vulkano::{
 use vulkano_win::VkSurfaceBuild;
 use winit::{
   dpi::LogicalSize,
-  event::{ElementState, Event, VirtualKeyCode, VirtualKeyCode::P, WindowEvent},
+  event::{ElementState, Event, VirtualKeyCode, WindowEvent},
   event_loop::{ControlFlow, EventLoop, EventLoopWindowTarget},
-  window::{Window, WindowBuilder},
+  window::{Window, WindowBuilder, WindowId},
 };
 
 const VALIDATION_LAYERS: &[&str] = &["VK_LAYER_LUNARG_standard_validation"];
@@ -843,14 +843,15 @@ impl HelloTriangleApplication {
   /// Takes full control of the executing thread and runs the event loop for it.
   fn main_loop(self) {
     let winit_window_surface = self.window_surface.winit_window_surface.clone();
-    self.window_surface.run(move |event, _, control_flow| {
+    let window_surface = self.window_surface;
+    // TODO move everything else into its own struct to move out here and be able to
+    // call "draw on" Maybe HelloTriangleRenderer
+    window_surface.run(move |event, _, control_flow| {
       let window = winit_window_surface.window();
 
       // By default continuously run this event loop, even if the OS hasn't
       // distributed an event, that way we will draw as fast as possible.
       *control_flow = ControlFlow::Poll;
-
-      println!("event was {:?}", event);
 
       match event {
         Event::MainEventsCleared => {
@@ -861,33 +862,37 @@ impl HelloTriangleApplication {
         }
         Event::RedrawRequested(_) => {
           // Redraw requested, this is called after MainEventsCleared.
-          // TODO issue redraw commands
+          // TODO draw frame
         }
-        // TODO put window events into subfunction.
-        Event::WindowEvent {
-          event: WindowEvent::CloseRequested,
-          ..
-        } => {
-          // When the window system requests a close, signal to winit that we'd like to
-          // close the window.
-          *control_flow = ControlFlow::Exit
-        }
-        Event::WindowEvent {
-          event: WindowEvent::KeyboardInput { input, .. },
-          ..
-        } => {
-          // When the keyboard input is a press on the escape key, exit and print the
-          // line.
-          if let (Some(VirtualKeyCode::Escape), ElementState::Pressed) =
-            (input.virtual_keycode, input.state)
-          {
-            dbg!();
-            *control_flow = ControlFlow::Exit
-          }
+        Event::WindowEvent { window_id, event } => {
+          Self::main_loop_window_event(&event, &window_id, control_flow)
         }
         _ => (),
       }
     });
+  }
+
+  fn main_loop_window_event(
+    event: &WindowEvent, _id: &WindowId, control_flow: &mut winit::event_loop::ControlFlow,
+  ) {
+    match event {
+      WindowEvent::CloseRequested => {
+        // When the window system requests a close, signal to winit that we'd like to
+        // close the window.
+        *control_flow = ControlFlow::Exit
+      }
+      WindowEvent::KeyboardInput { input, .. } => {
+        // When the keyboard input is a press on the escape key, exit and print the
+        // line.
+        if let (Some(VirtualKeyCode::Escape), ElementState::Pressed) =
+          (input.virtual_keycode, input.state)
+        {
+          dbg!();
+          *control_flow = ControlFlow::Exit
+        }
+      }
+      _ => (),
+    }
   }
 }
 
