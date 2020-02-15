@@ -1,7 +1,7 @@
 After the tutorials are finished, I'll add my own "chapters" that will include
 the following:
 
-## Print all queue families, sizes, and capabilities.
+## Make sure resize doesnt crash
 
 ## Create a new final project for vulkano that organizes things effectively and is more modular
 * remove allow dead code and use underscore names.
