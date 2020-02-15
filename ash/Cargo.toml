@@ -13,7 +13,7 @@ name = "instance_creation_ash"
 path = "src/01_instance.rs"
 
 [dependencies]
-ash = "0.29.0"
+ash = {git = "https://github.com/MaikKlein/ash" }
 winit = "0.21.0"
 # link between vulkano and winit, used for required_extensions
 vulkano-win = "0.17.0"
