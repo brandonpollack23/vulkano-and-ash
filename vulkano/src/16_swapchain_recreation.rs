@@ -128,6 +128,7 @@ type DrawFrameFuture = FenceSignalFuture<
 // of its own called Frame or something.
 #[allow(dead_code)]
 pub struct HelloTriangleRenderer {
+  // Begin Vulkan Structures.
   instance: Arc<Instance>,
   winit_window_surface: Arc<Surface<Window>>,
   debug_callback: Option<DebugCallback>,
@@ -156,7 +157,9 @@ pub struct HelloTriangleRenderer {
   swap_chain_framebuffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
 
   command_buffers: Vec<Arc<AutoCommandBuffer>>,
+  // End Vulkan Structures.
 
+  // Begin Non Vulkan Structures for flow control, waiting, maintenence etc.
   // TODO make these two fields their own class with method: waitforframe
   // Pretty dumb to have to hold onto the whole future which contains all these submembers and
   // their fields etc...can i just get the fence somehow?  I guess this has all the provable safety
@@ -168,6 +171,8 @@ pub struct HelloTriangleRenderer {
                                                                               * to
                                                                               * vec */
   current_flight_frame_index: usize, // Which of the above array to wait on before drawing.
+
+  frame_buffer_resized: bool,
 }
 impl HelloTriangleRenderer {
   fn initialize(instance: &Arc<Instance>, window_surface: &HelloTriangleWindow) -> Self {
@@ -212,6 +217,7 @@ impl HelloTriangleRenderer {
       command_buffers: vec![],
       frames_in_flight_futures: Default::default(),
       current_flight_frame_index: 0,
+      frame_buffer_resized: false,
     }
   }
 
@@ -888,6 +894,13 @@ impl HelloTriangleRenderer {
     self.create_command_buffers();
   }
 
+  /// Entry point to call back when your window system has resized
+  /// Internally (on Vulkan) recreates the swapchain...other backends might
+  /// handle differently so I figured a callback like this was good.
+  pub fn notify_window_resized(&mut self) {
+    self.frame_buffer_resized = true;
+  }
+
   /// What we've all been waiting to see.  Now that setup is done this is pretty
   /// simple (like OGL).
   ///
@@ -947,24 +960,30 @@ impl HelloTriangleRenderer {
     // The fence is already created to facilitate the future mechanism in vulkano,
     // and that fence (this future) is waited on before drawing.
     //
-    // Those futures reset their fences on destruction I presume.
-    let all_actions_future = match acquire_future
-      .then_execute(self.graphics_queue.clone(), command_buffer)
-      .unwrap()
-      .then_swapchain_present(
-        self.presentation_queue.clone(),
-        self.swap_chain.clone(),
-        image_index,
-      )
-      .then_signal_fence_and_flush()
-    {
-      Ok(r) => Some(r),
-      Err(FlushError::OutOfDate) => {
+    // We match on the frame_buffer_resized flag because an out of date return
+    // status isn't garunteed when the framebuffer is resized on all platforms.
+    // That flag is set by a callback handled by the platform (read winit) when
+    // a framebuffer resize occurs.
+    let all_actions_future = match (
+      self.frame_buffer_resized,
+      acquire_future
+        .then_execute(self.graphics_queue.clone(), command_buffer)
+        .unwrap()
+        .then_swapchain_present(
+          self.presentation_queue.clone(),
+          self.swap_chain.clone(),
+          image_index,
+        )
+        .then_signal_fence_and_flush(),
+    ) {
+      (false, Ok(r)) => Some(r),
+      (_, Err(FlushError::OutOfDate)) | (true, _) => {
         println!("swapchain out of date after flush, recreating swapchain...");
         self.recreate_swap_chain();
+        self.frame_buffer_resized = false;
         None
       }
-      Err(err) => {
+      (false, Err(err)) => {
         println!("{:?}", err);
         None
       }
@@ -1125,7 +1144,7 @@ impl HelloTriangleApplication {
           renderer.draw_frame();
         }
         Event::WindowEvent { window_id, event } => {
-          Self::main_loop_window_event(&event, &window_id, control_flow)
+          Self::main_loop_window_event(&event, &window_id, control_flow, &mut renderer);
         }
         _ => (),
       }
@@ -1134,6 +1153,7 @@ impl HelloTriangleApplication {
 
   fn main_loop_window_event(
     event: &WindowEvent, _id: &WindowId, control_flow: &mut winit::event_loop::ControlFlow,
+    renderer: &mut HelloTriangleRenderer,
   ) {
     match event {
       WindowEvent::CloseRequested => {
@@ -1152,6 +1172,7 @@ impl HelloTriangleApplication {
           *control_flow = ControlFlow::Exit
         }
       }
+      WindowEvent::Resized(_) => renderer.notify_window_resized(),
       _ => (),
     }
   }
