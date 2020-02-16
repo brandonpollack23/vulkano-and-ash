@@ -151,6 +151,9 @@ pub struct HelloTriangleRenderer {
   command_buffers: Vec<Arc<AutoCommandBuffer>>,
 
   // TODO make these two fields their own class with method: waitforframe
+  // Pretty dumb to have to hold onto the whole future which contains all these submembers and
+  // their fields etc...can i just get the fence somehow?  I guess this has all the provable safety
+  // magic and checking though...
   frames_in_flight_futures: [Option<DrawFrameFuture>; MAX_FRAMES_IN_FLIGHT], /* TODO size make
                                                                               * flag
                                                                               * and
