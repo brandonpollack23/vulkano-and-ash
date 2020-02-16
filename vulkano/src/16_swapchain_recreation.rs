@@ -1,4 +1,5 @@
 use std::{collections::HashSet, iter::FromIterator, sync::Arc};
+
 use vulkano::{
   self,
   command_buffer::{
@@ -21,10 +22,11 @@ use vulkano::{
   },
   single_pass_renderpass,
   swapchain::{
-    acquire_next_image, Capabilities, ColorSpace, CompositeAlpha, FullscreenExclusive,
-    PresentFuture, PresentMode, SupportedPresentModes, Surface, Swapchain, SwapchainAcquireFuture,
+    acquire_next_image, AcquireError, Capabilities, ColorSpace, CompositeAlpha,
+    FullscreenExclusive, PresentFuture, PresentMode, SupportedPresentModes, Surface, Swapchain,
+    SwapchainAcquireFuture,
   },
-  sync::{FenceSignalFuture, GpuFuture, SharingMode},
+  sync::{FenceSignalFuture, FlushError, GpuFuture, SharingMode},
 };
 use vulkano_win::VkSurfaceBuild;
 use winit::{
@@ -127,6 +129,7 @@ type DrawFrameFuture = FenceSignalFuture<
 #[allow(dead_code)]
 pub struct HelloTriangleRenderer {
   instance: Arc<Instance>,
+  winit_window_surface: Arc<Surface<Window>>,
   debug_callback: Option<DebugCallback>,
   physical_device_index: usize,
   logical_device: Arc<Device>,
@@ -184,6 +187,7 @@ impl HelloTriangleRenderer {
       &logical_device,
       &graphics_queue,
       &presentation_queue,
+      None,
     );
     let render_pass = Self::create_render_pass(&logical_device, swap_chain.format());
     // In a real implementation, we may have more than one pipeline for different
@@ -194,6 +198,7 @@ impl HelloTriangleRenderer {
 
     HelloTriangleRenderer {
       instance: instance.clone(),
+      winit_window_surface: window_surface.winit_window_surface.clone(),
       debug_callback,
       physical_device_index,
       logical_device,
@@ -339,10 +344,14 @@ impl HelloTriangleRenderer {
   }
 
   /// Create the swap chain and it's images for the surface.
-  fn create_swap_chain(
+  fn create_swap_chain<'a, SC: Into<Option<&'a Arc<Swapchain<Window>>>>>(
     instance: &Arc<Instance>, surface: &Arc<Surface<Window>>, physical_device_index: usize,
     logical_device: &Arc<Device>, graphics_queue: &Arc<Queue>, present_queue: &Arc<Queue>,
+    old_swapchain: SC,
   ) -> (Arc<Swapchain<Window>>, Vec<Arc<SwapchainImage<Window>>>) {
+    // Option conversion.
+    let old_swapchain = old_swapchain.into();
+
     let physical_device = PhysicalDevice::from_index(instance, physical_device_index).unwrap();
     let capabilities = surface
       .capabilities(physical_device)
@@ -387,29 +396,62 @@ impl HelloTriangleRenderer {
       image_count, extent, present_mode, surface_format
     );
 
-    Swapchain::new(
-      logical_device.clone(),
-      surface.clone(),
-      image_count,
-      surface_format.0, // Pixel Data Format
-      extent,
-      1,           // 1 layer, more would be for images with multiple layers like stereoscopic 3d.
-      image_usage, // Using the images for drawing to.
-      sharing_mode, /* Whether or not we are sharing queue families (concurrent) or not
-                    * (exclusive). */
-      capabilities.current_transform, /* A swapchain can apply an overall transform to an image,
-                                       * like rotation or flip.  No need to do that so just use
-                                       * the current transform of the capabilities. */
-      CompositeAlpha::Opaque, // Dont blend with other windows in the window system.
-      present_mode,           /* What type of present mode we're doing (immediate, fifo, fifo
-                               * messagebox etc). */
-      FullscreenExclusive::Default, // Controls the VkSurfaceFullScreenExclusiveInfoEXT value.
-      true,                         /* clipped, no need to draw pixels that are obscured (by
-                                     * another window or off the
-                                     * screen) */
-      surface_format.1, // ColorSpace
-    )
-    .expect("Unable to create swapchain!")
+    if old_swapchain.is_some() {
+      Swapchain::with_old_swapchain(
+        logical_device.clone(),
+        surface.clone(),
+        image_count,
+        surface_format.0, // Pixel Data Format
+        extent,
+        1,           /* 1 layer, more would be for images with multiple layers like stereoscopic
+                      * 3d. */
+        image_usage, // Using the images for drawing to.
+        sharing_mode, /* Whether or not we are sharing queue families (concurrent) or not
+                      * (exclusive). */
+        capabilities.current_transform, /* A swapchain can apply an overall transform to an
+                                         * image,
+                                         * like rotation or flip.  No need to do that so just
+                                         * use
+                                         * the current transform of the capabilities. */
+        CompositeAlpha::Opaque, // Dont blend with other windows in the window system.
+        present_mode,           /* What type of present mode we're doing (immediate, fifo, fifo
+                                 * messagebox etc). */
+        FullscreenExclusive::Default, // Controls the VkSurfaceFullScreenExclusiveInfoEXT value.
+        true,                         /* clipped, no need to draw pixels that are obscured (by
+                                       * another window or off the
+                                       * screen) */
+        surface_format.1, // ColorSpace
+        old_swapchain.unwrap().clone(),
+      )
+      .expect("Unable to create swapchain!")
+    } else {
+      Swapchain::new(
+        logical_device.clone(),
+        surface.clone(),
+        image_count,
+        surface_format.0, // Pixel Data Format
+        extent,
+        1,           /* 1 layer, more would be for images with multiple layers like stereoscopic
+                      * 3d. */
+        image_usage, // Using the images for drawing to.
+        sharing_mode, /* Whether or not we are sharing queue families (concurrent) or not
+                      * (exclusive). */
+        capabilities.current_transform, /* A swapchain can apply an overall transform to an
+                                         * image,
+                                         * like rotation or flip.  No need to do that so just
+                                         * use
+                                         * the current transform of the capabilities. */
+        CompositeAlpha::Opaque, // Dont blend with other windows in the window system.
+        present_mode,           /* What type of present mode we're doing (immediate, fifo, fifo
+                                 * messagebox etc). */
+        FullscreenExclusive::Default, // Controls the VkSurfaceFullScreenExclusiveInfoEXT value.
+        true,                         /* clipped, no need to draw pixels that are obscured (by
+                                       * another window or off the
+                                       * screen) */
+        surface_format.1, // ColorSpace
+      )
+      .expect("Unable to create swapchain!")
+    }
   }
 
   fn create_render_pass(
@@ -792,8 +834,65 @@ impl HelloTriangleRenderer {
       .collect();
   }
 
+  fn wait_until_gpu_idle(&self) {
+    for frame in &self.frames_in_flight_futures {
+      if let Some(frame) = frame {
+        frame.wait(None).unwrap();
+      }
+    }
+  }
+
+  /// Used to recreate the swap chain when the window surface changes (resize
+  /// etc) in a way that makes it no longer compatible.  All the cleanup is done
+  /// when the old resources are dropped.
+  fn recreate_swap_chain(&mut self) {
+    // Have to wait for idle because the resources might currently be in use we are
+    // about to destroy and replace.
+    self.wait_until_gpu_idle();
+
+    // The swap chain changes because the surface we're drawing to does, so the
+    // images inside it have to be changed.
+    let (swap_chain, swap_chain_images) = Self::create_swap_chain(
+      &self.instance,
+      &self.winit_window_surface,
+      self.physical_device_index,
+      &self.logical_device,
+      &self.graphics_queue,
+      &self.presentation_queue,
+      &self.swap_chain,
+    );
+    self.swap_chain = swap_chain.clone();
+    self.swap_chain_images = swap_chain_images;
+
+    // Render pass is bound to the swap chains format (this might not be necessary
+    // if format isn't what changed?)
+    self.render_pass = Self::create_render_pass(&self.logical_device, swap_chain.format());
+    // Pipeline has to be recreated because it's viewport's dimensions changed as
+    // well.  Note: This is avoidable if we use dynamic state for viewports and
+    // scissors.
+    self.graphics_pipeline = Self::create_graphics_pipeline(
+      &self.logical_device,
+      swap_chain.dimensions(),
+      &self.render_pass,
+    );
+    // And the framebuffer is dependent on the image views.
+    self.swap_chain_framebuffers =
+      Self::create_framebuffers(&self.swap_chain_images, &self.render_pass);
+
+    // Command buffers contain commands to draw to a specific framebuffer using the
+    // specific graphics pipeline, so they need to be recreated.
+    //
+    // No need to worry about what vulkan-tutorial does here with pool management
+    // and deciding to clean teh pool or the framebuffers etc, since we're using the
+    // default command pool provided by vulkano.
+    self.create_command_buffers();
+  }
+
   /// What we've all been waiting to see.  Now that setup is done this is pretty
   /// simple (like OGL).
+  ///
+  /// Takes in the window surface to draw to (in case there's some change to
+  /// it).
   ///
   /// 1) Find out which image from the swapchain that we want to render to.
   /// Recall that there were a number of images in the swapchain, Vulkan will
@@ -816,17 +915,27 @@ impl HelloTriangleRenderer {
   /// acquire_next_image_raw and use the UnsafeCommandBuffer and raw family of
   /// functions instead of GpuFuture family, which all rely on fence for their
   /// signaling.  More details [in Vulkan's Design Docs](https://github.com/vulkano-rs/vulkano/blob/master/DESIGN.md#command-buffers)
-  fn draw_frame(&mut self) {
+  pub fn draw_frame(&mut self) {
     if let Some(in_flight_future) = &self.frames_in_flight_futures[self.current_flight_frame_index]
     {
       // Wait indefinately until we can have a free in flight frame.
+      // TODO maybe super verbose print of info that we're idling?
       in_flight_future.wait(None).unwrap()
     }
     // the _ is a bool letting us know if the swapchain is suboptimally configured
     // for the surface targets, meaning the swapchain needs to be recreated (did
     // window extent change etc?).
-    let (image_index, _, acquire_future) =
-      acquire_next_image(self.swap_chain.clone(), None).unwrap();
+    let (image_index, _, acquire_future) = match acquire_next_image(self.swap_chain.clone(), None) {
+      Ok(r) => r,
+      Err(AcquireError::OutOfDate) => {
+        println!("swapchain out of date when acquiring image, recreating swapchain...");
+        self.recreate_swap_chain();
+        // Can't draw this frame so just exit.
+        return;
+      }
+      // TODO incompatible just continue
+      Err(err) => panic!("{:?}", err),
+    };
 
     // Use the command buffer associated with the swap_chain vkImage that the
     // framebuffer is using as the color attachment (and therefore output).
@@ -839,7 +948,7 @@ impl HelloTriangleRenderer {
     // and that fence (this future) is waited on before drawing.
     //
     // Those futures reset their fences on destruction I presume.
-    let all_actions_future = acquire_future
+    let all_actions_future = match acquire_future
       .then_execute(self.graphics_queue.clone(), command_buffer)
       .unwrap()
       .then_swapchain_present(
@@ -848,7 +957,18 @@ impl HelloTriangleRenderer {
         image_index,
       )
       .then_signal_fence_and_flush()
-      .unwrap();
+    {
+      Ok(r) => Some(r),
+      Err(FlushError::OutOfDate) => {
+        println!("swapchain out of date after flush, recreating swapchain...");
+        self.recreate_swap_chain();
+        None
+      }
+      Err(err) => {
+        println!("{:?}", err);
+        None
+      }
+    };
 
     // I could wait forever until all the submit actions are complete and only
     // have one frame in flight, thats the same as vkQueueWaitIdle, so we
@@ -858,7 +978,7 @@ impl HelloTriangleRenderer {
     // and based on their index add a wait on them for the current frame
     // we're drawing (a counter that can be incremented %
     // max_frames_in_flight) before replacing it.
-    self.frames_in_flight_futures[self.current_flight_frame_index] = Some(all_actions_future);
+    self.frames_in_flight_futures[self.current_flight_frame_index] = all_actions_future;
     self.current_flight_frame_index = (self.current_flight_frame_index + 1) % MAX_FRAMES_IN_FLIGHT;
   }
 }

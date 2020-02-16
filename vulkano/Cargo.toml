@@ -69,7 +69,7 @@ name = "rendering_and_presentation_vulkano"
 path = "src/15_rendering_and_presentation.rs"
 
 [[bin]]
-name = "swapchian_recreation_vulkano"
+name = "swapchain_recreation_vulkano"
 path = "src/16_swapchain_recreation.rs"
 
 [dependencies]
