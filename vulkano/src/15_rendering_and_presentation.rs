@@ -39,6 +39,7 @@ const VALIDATION_LAYERS: &[&str] = &["VK_LAYER_LUNARG_standard_validation"];
 const WIDTH: u32 = 800;
 const HEIGHT: u32 = 600;
 
+// TODO, wannta know more about what number is good here? [readme](https://software.intel.com/en-us/articles/practical-approach-to-vulkan-part-1)
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
 fn required_device_extensions() -> DeviceExtensions {
@@ -120,6 +121,9 @@ type DrawFrameFuture = FenceSignalFuture<
   >,
 >;
 
+// TODO when grouping, maybe group images, imageviews, framebuffers, commadn
+// buffers (and pool for them?), and the fence for their completion in a class
+// of its own called Frame or something.
 #[allow(dead_code)]
 pub struct HelloTriangleRenderer {
   instance: Arc<Instance>,
@@ -575,8 +579,15 @@ impl HelloTriangleRenderer {
       .map(|image| {
         let fba: Arc<dyn FramebufferAbstract + Send + Sync> = Arc::new(
           Framebuffer::start(render_pass.clone())
-                .add(image.clone()) // Only one buffer, the output color buffer.  In deferred rendering this might be diffuse, normals, depth buffers, etc as well as final image.
-                .unwrap()
+                .add(image.clone()) /* Only one buffer, the output color buffer. In deferred 
+                                       rendering this might be diffuse, normals, depth buffers, etc
+                                        as well as final image.  Note that this (in actual Vulkan) 
+                                        is an imageView, not the image, so if you had to create 
+                                        other "Framebuffers" for different combined rendering 
+                                        techniques, they could all output to different 
+                                        ImageView-based attachments on the same 
+                                        Image (SwapChainImage in this case).*/
+              .unwrap()
                 .build()
                 .expect("Unable to create framebuffer!"),
         );
