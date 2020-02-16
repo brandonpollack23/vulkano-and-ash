@@ -3,6 +3,8 @@ the following:
 
 ## Make sure resize doesnt crash
 
+## FPS counter that prints every second
+
 ## Create a new final project for vulkano that organizes things effectively and is more modular
 * remove allow dead code and use underscore names.
 * fix warnings

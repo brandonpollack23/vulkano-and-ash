@@ -1,7 +1,10 @@
 use std::{collections::HashSet, iter::FromIterator, sync::Arc};
 use vulkano::{
   self,
-  command_buffer::{AutoCommandBuffer, AutoCommandBufferBuilder, DynamicState},
+  command_buffer::{
+    pool::standard::StandardCommandPoolAlloc, AutoCommandBuffer, AutoCommandBufferBuilder,
+    CommandBufferExecFuture, DynamicState,
+  },
   descriptor::PipelineLayoutAbstract,
   device::{Device, DeviceExtensions, Features, Queue},
   format::Format,
@@ -18,10 +21,10 @@ use vulkano::{
   },
   single_pass_renderpass,
   swapchain::{
-    acquire_next_image, Capabilities, ColorSpace, CompositeAlpha, FullscreenExclusive, PresentMode,
-    SupportedPresentModes, Surface, Swapchain,
+    acquire_next_image, Capabilities, ColorSpace, CompositeAlpha, FullscreenExclusive,
+    PresentFuture, PresentMode, SupportedPresentModes, Surface, Swapchain, SwapchainAcquireFuture,
   },
-  sync::{GpuFuture, SharingMode},
+  sync::{FenceSignalFuture, GpuFuture, SharingMode},
 };
 use vulkano_win::VkSurfaceBuild;
 use winit::{
@@ -35,6 +38,8 @@ const VALIDATION_LAYERS: &[&str] = &["VK_LAYER_LUNARG_standard_validation"];
 
 const WIDTH: u32 = 800;
 const HEIGHT: u32 = 600;
+
+const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
 fn required_device_extensions() -> DeviceExtensions {
   DeviceExtensions {
@@ -105,6 +110,16 @@ type ConcreteGraphicsPipeline = GraphicsPipeline<
   Arc<dyn RenderPassAbstract + Send + Sync + 'static>,
 >;
 
+type DrawFrameFuture = FenceSignalFuture<
+  PresentFuture<
+    CommandBufferExecFuture<
+      SwapchainAcquireFuture<Window>,
+      Arc<AutoCommandBuffer<StandardCommandPoolAlloc>>,
+    >,
+    Window,
+  >,
+>;
+
 #[allow(dead_code)]
 pub struct HelloTriangleRenderer {
   instance: Arc<Instance>,
@@ -134,6 +149,15 @@ pub struct HelloTriangleRenderer {
   swap_chain_framebuffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
 
   command_buffers: Vec<Arc<AutoCommandBuffer>>,
+
+  // TODO make these two fields their own class with method: waitforframe
+  frames_in_flight_futures: [Option<DrawFrameFuture>; MAX_FRAMES_IN_FLIGHT], /* TODO size make
+                                                                              * flag
+                                                                              * and
+                                                                              * change
+                                                                              * to
+                                                                              * vec */
+  current_flight_frame_index: usize, // Which of the above array to wait on before drawing.
 }
 impl HelloTriangleRenderer {
   fn initialize(instance: &Arc<Instance>, window_surface: &HelloTriangleWindow) -> Self {
@@ -173,8 +197,9 @@ impl HelloTriangleRenderer {
       render_pass,
       graphics_pipeline,
       swap_chain_framebuffers,
-
       command_buffers: vec![],
+      frames_in_flight_futures: Default::default(),
+      current_flight_frame_index: 0,
     }
   }
 
@@ -778,6 +803,11 @@ impl HelloTriangleRenderer {
   /// functions instead of GpuFuture family, which all rely on fence for their
   /// signaling.  More details [in Vulkan's Design Docs](https://github.com/vulkano-rs/vulkano/blob/master/DESIGN.md#command-buffers)
   fn draw_frame(&mut self) {
+    if let Some(in_flight_future) = &self.frames_in_flight_futures[self.current_flight_frame_index]
+    {
+      // Wait indefinately until we can have a free in flight frame.
+      in_flight_future.wait(None).unwrap()
+    }
     // the _ is a bool letting us know if the swapchain is suboptimally configured
     // for the surface targets, meaning the swapchain needs to be recreated (did
     // window extent change etc?).
@@ -788,6 +818,13 @@ impl HelloTriangleRenderer {
     // framebuffer is using as the color attachment (and therefore output).
     let command_buffer = self.command_buffers[image_index].clone();
 
+    // Not shown here but present waits on a semaphore signalled by execution of the
+    // command buffer, and the commadn buffer waits on a semaphore signalled when
+    // the next framebuffer image is acquired.
+    // The fence is already created to facilitate the future mechanism in vulkano,
+    // and that fence (this future) is waited on before drawing.
+    //
+    // Those futures reset their fences on destruction I presume.
     let all_actions_future = acquire_future
       .then_execute(self.graphics_queue.clone(), command_buffer)
       .unwrap()
@@ -799,8 +836,16 @@ impl HelloTriangleRenderer {
       .then_signal_fence_and_flush()
       .unwrap();
 
-    // Wait forever until all the submit actions are complete.
-    all_actions_future.wait(None).unwrap();
+    // I could wait forever until all the submit actions are complete and only
+    // have one frame in flight, thats the same as vkQueueWaitIdle, so we
+    // can do better and have multple frames in flight. all_actions_future.
+    // wait(None).unwrap(); Frames in Flight max: just have a vec of max
+    // frames in flight (constant or flag) length as a member of the struct
+    // and based on their index add a wait on them for the current frame
+    // we're drawing (a counter that can be incremented %
+    // max_frames_in_flight) before replacing it.
+    self.frames_in_flight_futures[self.current_flight_frame_index] = Some(all_actions_future);
+    self.current_flight_frame_index = (self.current_flight_frame_index + 1) % MAX_FRAMES_IN_FLIGHT;
   }
 }
 
@@ -922,7 +967,7 @@ impl HelloTriangleApplication {
   }
 
   /// Takes full control of the executing thread and runs the event loop for it.
-  fn main_loop(mut self) {
+  fn main_loop(self) {
     let winit_window_surface = self.window_surface.winit_window_surface.clone();
     let mut renderer = self.renderer;
     // TODO move everything else into its own struct to move out here and be able to
