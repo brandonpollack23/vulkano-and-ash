@@ -160,6 +160,8 @@ pub struct HelloTriangleRenderer {
   // End Vulkan Structures.
 
   // Begin Non Vulkan Structures for flow control, waiting, maintenence etc.
+  rendering_enabled: bool,
+
   // TODO make these two fields their own class with method: waitforframe
   // Pretty dumb to have to hold onto the whole future which contains all these submembers and
   // their fields etc...can i just get the fence somehow?  I guess this has all the provable safety
@@ -214,6 +216,7 @@ impl HelloTriangleRenderer {
       render_pass,
       graphics_pipeline,
       swap_chain_framebuffers,
+      rendering_enabled: true,
       command_buffers: vec![],
       frames_in_flight_futures: Default::default(),
       current_flight_frame_index: 0,
@@ -398,7 +401,7 @@ impl HelloTriangleRenderer {
 
     println!(
       "Creating Swapchain:\n\timage_count: {}\n\textent: {:?}\n\tpresent_mode \
-       {:?}\n\tsurface_format: {:?}",
+       {:?}\n\tsurface_format: {:?}\n",
       image_count, extent, present_mode, surface_format
     );
 
@@ -856,6 +859,10 @@ impl HelloTriangleRenderer {
     // about to destroy and replace.
     self.wait_until_gpu_idle();
 
+    if !self.rendering_enabled {
+      return;
+    }
+
     // The swap chain changes because the surface we're drawing to does, so the
     // images inside it have to be changed.
     let (swap_chain, swap_chain_images) = Self::create_swap_chain(
@@ -894,6 +901,11 @@ impl HelloTriangleRenderer {
     self.create_command_buffers();
   }
 
+  pub fn set_rendering_enabled(&mut self, enabled: bool) {
+    println!("Toggling rendering enabled to: {}", enabled);
+    self.rendering_enabled = enabled;
+  }
+
   /// Entry point to call back when your window system has resized
   /// Internally (on Vulkan) recreates the swapchain...other backends might
   /// handle differently so I figured a callback like this was good.
@@ -929,6 +941,10 @@ impl HelloTriangleRenderer {
   /// functions instead of GpuFuture family, which all rely on fence for their
   /// signaling.  More details [in Vulkan's Design Docs](https://github.com/vulkano-rs/vulkano/blob/master/DESIGN.md#command-buffers)
   pub fn draw_frame(&mut self) {
+    if !self.rendering_enabled {
+      return;
+    }
+
     if let Some(in_flight_future) = &self.frames_in_flight_futures[self.current_flight_frame_index]
     {
       // Wait indefinately until we can have a free in flight frame.
@@ -1172,7 +1188,14 @@ impl HelloTriangleApplication {
           *control_flow = ControlFlow::Exit
         }
       }
-      WindowEvent::Resized(_) => renderer.notify_window_resized(),
+      WindowEvent::Resized(size) => {
+        // If the size is 0, minimization or something like that happened so I toggle
+        // drawing.
+        let enabled = !(size.height == 0 && size.width == 0);
+        renderer.set_rendering_enabled(enabled);
+
+        renderer.notify_window_resized()
+      }
       _ => (),
     }
   }
