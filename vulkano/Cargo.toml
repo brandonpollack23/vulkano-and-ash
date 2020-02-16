@@ -68,6 +68,10 @@ path = "src/14_command_buffers.rs"
 name = "rendering_and_presentation_vulkano"
 path = "src/15_rendering_and_presentation.rs"
 
+[[bin]]
+name = "swapchian_recreation_vulkano"
+path = "src/16_swapchain_recreation.rs"
+
 [dependencies]
 vulkano = "0.17.0"
 vulkano-shaders = "0.17.0"
