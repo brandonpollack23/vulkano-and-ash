@@ -72,9 +72,13 @@ path = "src/15_rendering_and_presentation.rs"
 name = "swapchain_recreation_vulkano"
 path = "src/16_swapchain_recreation.rs"
 
+[[bin]]
+name = "vertex_input_description_vertex_buffer_creation_vulkano"
+path = "src/17_18_vertex_input_description_vertex_buffer_creation.rs"
+
 [dependencies]
+lazy_static = "1.4.0"
 vulkano = "0.17.0"
 vulkano-shaders = "0.17.0"
+vulkano-win = "0.17.0" # link between vulkano and winit, used for required_extensions
 winit = "0.21.0"
-# link between vulkano and winit, used for required_extensions
-vulkano-win = "0.17.0"
