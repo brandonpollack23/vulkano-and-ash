@@ -1027,16 +1027,15 @@ pub struct HelloTriangleApplication {
 }
 impl HelloTriangleApplication {
   fn initialize() -> Self {
-    // This way we can see that we're tightly coupled to Vulkano's method of
-    // rendering, even though this should help seperate it out. If I were to
-    // have different rendering backends for this application, Instead of Relying on
-    // having an instance member directly, I'd have a member called renderer which
-    // just has to implement a trait. Then I could have what is essentially this
-    // struct and HelloTriangleRenderer sans main loop implement that and rely only
-    // on that renderer being constructed by the application driver and passed in or
-    // rely on cfg flags to figure it out correctly.
-    //
-    // All that said...there's no need to do it.
+    // If I wanted multiple backends (not just Vulkan) I could pass in the backend
+    // (impl of a trait RenderingBackend) to this function.  I can put that even
+    // behind one more level of abstraction to have just a generic renderer with a
+    // selectable configuration. Anyway, I can select whichever I you want with that
+    // or injection, then struct type parameter stores it as the type of
+    // renderer or whatever. This Backend would define all public methods that
+    // this class uses internally (draw_frame, invalidate, etc).  Backend itself
+    // could be constructed similarly (have it's deps injected like
+    // window_surface here).
     let instance = Self::create_vulkan_instance();
     let window_surface = HelloTriangleWindow::create_vksurface_and_window(&instance);
     let renderer = HelloTriangleRenderer::initialize(&instance, &window_surface);
@@ -1139,8 +1138,6 @@ impl HelloTriangleApplication {
   fn main_loop(self) {
     let winit_window_surface = self.window_surface.winit_window_surface.clone();
     let mut renderer = self.renderer;
-    // TODO move everything else into its own struct to move out here and be able to
-    // call "draw on" Maybe HelloTriangleRenderer
     self.window_surface.run(move |event, _, control_flow| {
       let window = winit_window_surface.window();
 
