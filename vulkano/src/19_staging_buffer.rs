@@ -173,9 +173,35 @@ type DrawFrameFuture = FenceSignalFuture<
   >,
 >;
 
-// TODO when grouping, maybe group images, imageviews, framebuffers, commadn
-// buffers (and pool for them?), and the fence for their completion in a class
-// of its own called Frame or something.
+/// An actualy standalone renderer probably would not store this all here like
+/// this.
+///
+/// 1) Render Passes would be a Vec with all the ones needed.
+///
+/// 2) Each renderable object would have a struct representing it.
+/// we'd have the pipelines as a Vec (with the index as a handle in the above
+/// struct).
+///
+/// 3) Command buffers as a vec of vecs (the first dimension an index that
+/// is a handle in the above struct, the second would just be one for each
+/// framebuffer as it is now).
+///
+/// 4) If loaded by external files, meshes would be handled by some resource
+/// manager outside the renderer, and those files would only stay in CPU memory
+/// until step #5 is complete, unless they're needed for manipulation or
+/// something.
+///
+/// 5) Staging buffer might just be kept around so it can be reused? Why free
+/// it?
+///
+/// 6) Vertex Buffers, and (optionally) Index Buffers, textures, which shader to
+/// use, shader, (rendering strategy?) etc would likely have handles to them
+/// (vulkan or custom) stored in some sub struct that is created with a family
+/// of methods that take in various formats (files, raw data, etc).
+///
+/// 7) There could be default shaders but a user could use a public method to
+/// add a shader by file, spirv bytes, or vkShaderModule directly.  This would
+/// return a handle for use in #6
 #[allow(dead_code)]
 pub struct HelloTriangleRenderer {
   // Begin Vulkan Structures.
