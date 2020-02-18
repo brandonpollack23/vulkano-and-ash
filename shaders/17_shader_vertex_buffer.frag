@@ -1,6 +1,6 @@
 #version 450
 // This extension allows for multiple multiple to use this shader at a time.  Since we already kind of keep things seperate in Vulkan I feel like this was already implied.
-#extension GL_ARB_seperate_shader_objects : enable
+#extension GL_ARB_separate_shader_objects : enable
 
 // Specify the same input location index (0) as the output of the vert shader.
 // The value here will be automagically interpolated by the GPU in all dimensions

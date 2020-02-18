@@ -45,7 +45,7 @@ const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
 lazy_static! {
   static ref HELLO_TRIANGLE_VERTICES: Vec<My2dVertex> = vec![
-    My2dVertex::new([0.0f32, -0.5f32], [1.0f32, 0.0f32, 0.0f32]), // Center Red
+    My2dVertex::new([0.0f32, -0.5f32], [1.0f32, 1.0f32, 1.0f32]), // Center White
     My2dVertex::new([0.5f32, 0.5f32], [0.0f32, 1.0f32, 0.0f32]),  // Bottom Right Green
     My2dVertex::new([-0.5f32, 0.5f32], [0.0f32, 0.0f32, 1.0f32]), // Bottom Left Blue
   ];
