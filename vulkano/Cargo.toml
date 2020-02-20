@@ -80,6 +80,10 @@ path = "src/17_18_vertex_input_description_vertex_buffer_creation.rs"
 name = "staging_buffer_vulkano"
 path = "src/19_staging_buffer.rs"
 
+[[bin]]
+name = "index_buffer_vulkano"
+path = "src/20_index_buffer.rs"
+
 [dependencies]
 lazy_static = "1.4.0"
 vulkano = "0.17.0"
