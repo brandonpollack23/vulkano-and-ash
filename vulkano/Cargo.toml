@@ -84,6 +84,10 @@ path = "src/19_staging_buffer.rs"
 name = "index_buffer_vulkano"
 path = "src/20_index_buffer.rs"
 
+[[bin]]
+name = "uniform_buffer_objects_vulkano"
+path = "src/21_uniform_buffer_objects.rs"
+
 [dependencies]
 lazy_static = "1.4.0"
 vulkano = "0.17.0"
