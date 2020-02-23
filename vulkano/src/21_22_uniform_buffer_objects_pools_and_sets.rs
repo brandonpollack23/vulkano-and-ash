@@ -35,6 +35,9 @@ use winit::{
 };
 
 use lazy_static::lazy_static;
+use vulkano::descriptor::descriptor_set::{
+  FixedSizeDescriptorSet, FixedSizeDescriptorSetsPool, PersistentDescriptorSetBuf,
+};
 
 const VALIDATION_LAYERS: &[&str] = &["VK_LAYER_LUNARG_standard_validation"];
 
@@ -111,8 +114,8 @@ impl_vertex!(My2dVertex, inPosition, inColor);
 /// In a real implementation we'd do the MVP matrix multiplication on the CPU
 /// since it doesn't change between the vertices of a single object.
 ///
-/// Vulkano creates the DescriptorSetLayout automagically for us when allocating
-/// the DescriptorSet from the DescriptorPool.
+/// Vulkano creates the DescriptorSetLayout automagically for us when building
+/// the pipeline (and I think it gets that out of the shader?) no clue.
 #[derive(Copy, Clone)]
 struct MyMvpUniformBufferObject {
   model: glm::Mat4,
@@ -248,6 +251,16 @@ pub struct HelloTriangleRenderer {
 
   swap_chain_framebuffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
 
+  descriptor_sets_pool: FixedSizeDescriptorSetsPool,
+  descriptor_sets: Vec<
+    Arc<
+      FixedSizeDescriptorSet<(
+        (),
+        PersistentDescriptorSetBuf<Arc<CpuAccessibleBuffer<MyMvpUniformBufferObject>>>,
+      )>,
+    >,
+  >,
+
   command_buffers: Vec<Arc<AutoCommandBuffer>>,
   // End Vulkan Structures.
 
@@ -322,8 +335,9 @@ impl HelloTriangleRenderer {
     let vertex_buffer = Self::create_vertex_buffer(&graphics_queue);
     let index_buffer = Self::create_index_buffer(&graphics_queue);
 
-    // TODO Consider: how would a consumer let a renderer know that there are
-    // uniforms they'd want to update and then how would this get set up?
+    // TODO Consider: how would a consumer providing their own shader let a renderer
+    // know that there are uniforms they'd want to update and then how would
+    // this get set up?
     let uniform_buffers = Self::create_uniform_buffers(
       &logical_device,
       swap_chain_images.len(),
@@ -333,6 +347,11 @@ impl HelloTriangleRenderer {
         swap_chain.dimensions()[1] as f32,
       ],
     );
+
+    let mut descriptor_sets_pool = Self::create_descriptor_sets_pool(&graphics_pipeline);
+    // TODO Consider: how would a consumer providing their own shader have these
+    // descriptor sets generated?
+    let descriptor_sets = Self::create_descriptor_sets(&mut descriptor_sets_pool, &uniform_buffers);
 
     HelloTriangleRenderer {
       instance: instance.clone(),
@@ -348,6 +367,8 @@ impl HelloTriangleRenderer {
       graphics_pipeline,
       swap_chain_framebuffers,
       rendering_enabled: true,
+      descriptor_sets_pool,
+      descriptor_sets,
       command_buffers: vec![],
       frames_in_flight_futures: Default::default(),
       current_flight_frame_index: 0,
@@ -812,7 +833,7 @@ impl HelloTriangleRenderer {
     logical_device: &Arc<Device>, num_buffers: usize, start_time: Instant, dimensions: [f32; 2],
   ) -> Vec<Arc<CpuAccessibleBuffer<MyMvpUniformBufferObject>>> {
     let mut buffers = Vec::new();
-    let uniform_buffer = Self::update_mvp_uniform_buffers(start_time, dimensions);
+    let uniform_buffer = Self::get_new_mvp_uniform_buffer_value(start_time, dimensions);
     for _ in 0..num_buffers {
       let buffer = CpuAccessibleBuffer::from_data(
         logical_device.clone(),
@@ -827,12 +848,38 @@ impl HelloTriangleRenderer {
     buffers
   }
 
+  /// Don't really know whats going on anymore, Vulkano's docs starting to break
+  /// down and I can't be bothered to go through examples. Already decided I
+  /// think I'd rather use Ash.
+  fn create_descriptor_sets_pool(
+    graphics_pipeline: &Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
+  ) -> FixedSizeDescriptorSetsPool {
+    FixedSizeDescriptorSetsPool::new(graphics_pipeline.descriptor_set_layout(0).unwrap().clone())
+  }
+
+  fn create_descriptor_sets(
+    pool: &mut FixedSizeDescriptorSetsPool,
+    uniform_buffers: &[Arc<CpuAccessibleBuffer<MyMvpUniformBufferObject>>],
+  ) -> Vec<
+    Arc<
+      FixedSizeDescriptorSet<(
+        (),
+        PersistentDescriptorSetBuf<Arc<CpuAccessibleBuffer<MyMvpUniformBufferObject>>>,
+      )>,
+    >,
+  > {
+    uniform_buffers
+      .iter()
+      .map(|ub| Arc::new(pool.next().add_buffer(ub.clone()).unwrap().build().unwrap()))
+      .collect()
+  }
+
   /// This function would not be part of the renderer but would actually be a
   /// part of the application production new values for the struct that would
   /// get sent over as a uniform.
   ///
   /// Start time is to find duration, dimensions is to find AR
-  fn update_mvp_uniform_buffers(
+  fn get_new_mvp_uniform_buffer_value(
     start_time: Instant, dimensions: [f32; 2],
   ) -> MyMvpUniformBufferObject {
     let duration_ms = Instant::now().duration_since(start_time).as_millis() as f32 / 1000f32;
@@ -1044,8 +1091,9 @@ impl HelloTriangleRenderer {
           )
           .unwrap()
           .update_buffer(
+            // This will map copy unmap internall for me.
             self.uniform_buffers[i].clone(),
-            Self::update_mvp_uniform_buffers(Instant::now(), dimensions),
+            Self::get_new_mvp_uniform_buffer_value(Instant::now(), dimensions),
           )
           .unwrap()
           .begin_render_pass(
@@ -1059,7 +1107,7 @@ impl HelloTriangleRenderer {
             &DynamicState::none(),
             vec![self.vertex_buffer.clone()],
             self.index_buffer.clone(),
-            (), // self.descriptor_sets.clone(),
+            self.descriptor_sets[i].clone(),
             (),
           )
           .unwrap()
