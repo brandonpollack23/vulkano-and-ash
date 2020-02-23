@@ -85,11 +85,12 @@ name = "index_buffer_vulkano"
 path = "src/20_index_buffer.rs"
 
 [[bin]]
-name = "uniform_buffer_objects_vulkano"
-path = "src/21_uniform_buffer_objects.rs"
+name = "uniform_buffer_objects_sets_vulkano"
+path = "src/21_22_uniform_buffer_objects_pools_and_sets.rs"
 
 [dependencies]
 lazy_static = "1.4.0"
+nalgebra-glm = "0.5.0"
 vulkano = "0.17.0"
 vulkano-shaders = "0.17.0"
 vulkano-win = "0.17.0" # link between vulkano and winit, used for required_extensions

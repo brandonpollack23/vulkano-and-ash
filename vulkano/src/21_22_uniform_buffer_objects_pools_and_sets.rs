@@ -1,8 +1,9 @@
-use std::{collections::HashSet, iter::FromIterator, sync::Arc};
+use std::{collections::HashSet, iter::FromIterator, sync::Arc, time::Instant};
 
+use nalgebra_glm as glm;
 use vulkano::{
   self,
-  buffer::{BufferAccess, BufferUsage},
+  buffer::{BufferAccess, BufferUsage, CpuAccessibleBuffer, ImmutableBuffer, TypedBufferAccess},
   command_buffer::{
     pool::standard::StandardCommandPoolAlloc, AutoCommandBuffer, AutoCommandBufferBuilder,
     CommandBufferExecFuture, DynamicState,
@@ -34,7 +35,6 @@ use winit::{
 };
 
 use lazy_static::lazy_static;
-use vulkano::buffer::{ImmutableBuffer, TypedBufferAccess};
 
 const VALIDATION_LAYERS: &[&str] = &["VK_LAYER_LUNARG_standard_validation"];
 
@@ -80,7 +80,6 @@ impl My2dVertex {
   }
 }
 
-// TODO copy this when I made ash!  Good excuse to learn basic macros.
 // Vulkano provides this macro to implement Vertex trait, which implements the
 // member() method. This macro inspects the shape of the struct passed in and
 // generates information needed to determine VertexInputAttributeDescription.
@@ -105,6 +104,21 @@ impl My2dVertex {
 // returning their byte size. Then it gets the offset into the struct of each
 // value by doing pointer case and sutraction (just like in C!).
 impl_vertex!(My2dVertex, inPosition, inColor);
+
+/// The struct that we are using the represent the UBO in our shaders, the
+/// bindings are described by a descriptor layout.
+///
+/// In a real implementation we'd do the MVP matrix multiplication on the CPU
+/// since it doesn't change between the vertices of a single object.
+///
+/// Vulkano creates the DescriptorSetLayout automagically for us when allocating
+/// the DescriptorSet from the DescriptorPool.
+#[derive(Copy, Clone)]
+struct MyMvpUniformBufferObject {
+  model: glm::Mat4,
+  view: glm::Mat4,
+  projection: glm::Mat4,
+}
 
 fn required_device_extensions() -> DeviceExtensions {
   DeviceExtensions {
@@ -262,9 +276,16 @@ pub struct HelloTriangleRenderer {
                                                                             * we're only sending
                                                                             * 6 not 65535
                                                                             * indices */
+
+  uniform_buffers: Vec<Arc<CpuAccessibleBuffer<MyMvpUniformBufferObject>>>,
+
+  // Application specific stuff, would not be in real renderer.
+  start_time: Instant,
 }
 impl HelloTriangleRenderer {
   fn initialize(instance: &Arc<Instance>, window_surface: &HelloTriangleWindow) -> Self {
+    let start_time = Instant::now();
+
     let debug_callback = Self::setup_debug_callback_if_enabled(&instance);
     let physical_device_index =
       Self::pick_physical_device(&instance, &window_surface.winit_window_surface);
@@ -301,6 +322,18 @@ impl HelloTriangleRenderer {
     let vertex_buffer = Self::create_vertex_buffer(&graphics_queue);
     let index_buffer = Self::create_index_buffer(&graphics_queue);
 
+    // TODO Consider: how would a consumer let a renderer know that there are
+    // uniforms they'd want to update and then how would this get set up?
+    let uniform_buffers = Self::create_uniform_buffers(
+      &logical_device,
+      swap_chain_images.len(),
+      start_time,
+      [
+        swap_chain.dimensions()[0] as f32,
+        swap_chain.dimensions()[1] as f32,
+      ],
+    );
+
     HelloTriangleRenderer {
       instance: instance.clone(),
       winit_window_surface: window_surface.winit_window_surface.clone(),
@@ -321,6 +354,8 @@ impl HelloTriangleRenderer {
       frame_buffer_resized: false,
       vertex_buffer,
       index_buffer,
+      uniform_buffers,
+      start_time,
     }
   }
 
@@ -770,6 +805,69 @@ impl HelloTriangleRenderer {
     buffer
   }
 
+  /// Since I need to create varying numbers of uniform buffers (in this case
+  /// one for each frame in flight) there is a number argument and we return a
+  /// rec of them.
+  fn create_uniform_buffers(
+    logical_device: &Arc<Device>, num_buffers: usize, start_time: Instant, dimensions: [f32; 2],
+  ) -> Vec<Arc<CpuAccessibleBuffer<MyMvpUniformBufferObject>>> {
+    let mut buffers = Vec::new();
+    let uniform_buffer = Self::update_mvp_uniform_buffers(start_time, dimensions);
+    for _ in 0..num_buffers {
+      let buffer = CpuAccessibleBuffer::from_data(
+        logical_device.clone(),
+        BufferUsage::uniform_buffer(),
+        false,
+        uniform_buffer,
+      )
+      .expect("Could not create uniform buffer");
+      buffers.push(buffer);
+    }
+
+    buffers
+  }
+
+  /// This function would not be part of the renderer but would actually be a
+  /// part of the application production new values for the struct that would
+  /// get sent over as a uniform.
+  ///
+  /// Start time is to find duration, dimensions is to find AR
+  fn update_mvp_uniform_buffers(
+    start_time: Instant, dimensions: [f32; 2],
+  ) -> MyMvpUniformBufferObject {
+    let duration_ms = Instant::now().duration_since(start_time).as_millis() as f32 / 1000f32;
+
+    // Rotate 90 degrees per second.
+    let model = glm::rotate(
+      &glm::identity(),
+      glm::pi::<f32>() * duration_ms, // 90 degrees per second
+      &glm::vec3(0f32, 0f32, 1f32),   // About z axis
+    );
+
+    let view = glm::look_at_rh(
+      &glm::vec3(2.0f32, 2.0f32, 2.0f32),
+      &glm::vec3(0.0f32, 0.0f32, 0.0f32),
+      &glm::vec3(0.0f32, 0.0f32, 1.0f32),
+    );
+
+    let ar = dimensions[1] / dimensions[0];
+    let projection = glm::perspective_fov_rh(
+      glm::pi::<f32>() / 2f32,
+      dimensions[0],
+      dimensions[1],
+      0.1f32,
+      10.0f32,
+    );
+
+    // no need to flip y because I already used right hand look at :D
+
+    MyMvpUniformBufferObject {
+      model,
+      view,
+      projection,
+    }
+  }
+
   /// Checks if the device has all the features and queue families needed.
   fn is_device_suitable(surface: &Arc<Surface<Window>>, physical_device: &PhysicalDevice) -> bool {
     // Supports all queue families we need.
@@ -929,14 +1027,25 @@ impl HelloTriangleRenderer {
   /// normals depth stencil etc for other deferred or PBR strategies).
   fn create_command_buffers(&mut self) {
     let queue_family = self.graphics_queue.family();
+    let dimensions = [
+      self.swap_chain.dimensions()[0] as f32,
+      self.swap_chain.dimensions()[1] as f32,
+    ];
+
     self.command_buffers = self
       .swap_chain_framebuffers
       .iter()
-      .map(|framebuffer| {
+      .enumerate()
+      .map(|(i, framebuffer)| {
         Arc::new(
           AutoCommandBufferBuilder::primary_simultaneous_use(
             self.logical_device.clone(),
             queue_family,
+          )
+          .unwrap()
+          .update_buffer(
+            self.uniform_buffers[i].clone(),
+            Self::update_mvp_uniform_buffers(Instant::now(), dimensions),
           )
           .unwrap()
           .begin_render_pass(
@@ -950,7 +1059,7 @@ impl HelloTriangleRenderer {
             &DynamicState::none(),
             vec![self.vertex_buffer.clone()],
             self.index_buffer.clone(),
-            (),
+            (), // self.descriptor_sets.clone(),
             (),
           )
           .unwrap()
