@@ -8,10 +8,6 @@ edition = "2018"
 name = "base_code_ash"
 path = "src/00_base_code.rs"
 
-[[bin]]
-name = "instance_creation_ash"
-path = "src/01_instance.rs"
-
 [dependencies]
 ash = {git = "https://github.com/MaikKlein/ash" }
 winit = "0.21.0"
